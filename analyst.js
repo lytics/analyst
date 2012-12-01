@@ -1,35 +1,18 @@
-/*jshint sub:true */
-(function(d3) {
+/*jshint sub:true, boss:true*/
+(function() {
   // 'Root' object, `window` in browsers, `global` in Node
-  var root = this;
+  var root = this,
+    d3 = root.d3,
+    crossfilter = root.crossfilter;
 
   // Namespace object
-  var analyst = function() {};
+  var analyst = {};
 
   (function() {
     'use strict';
 
     // Internal list of available drivers
     var drivers = {};
-
-    // Object that represents a source of data that 'metrics' can be drawn from
-    var Source = analyst.source = function(type, options) {
-      // Enable shorthand `new` omission
-      if (!(this instanceof Source)) {
-        return new Source(type, options);
-      }
-
-      if (!drivers[type]) {
-        throw new Error("Source type '" + type + "' unknown");
-      }
-
-      this._data = [];
-      this._driver = new drivers[type](options);
-      this._dispatch = d3.dispatch('change');
-      this._counter = 1;
-
-      this.fetch();
-    };
 
     // Add a source adapter implementation
     analyst.addDriver = function(name, driver) {
@@ -45,207 +28,265 @@
       drivers[name] = constructor;
     };
 
-    Source.prototype = {
-      on: function(event, listener) {
-        // Add a unique 'name' to the counter so as not to clobber other listeners
-        this._dispatch.on(event + '.' + this._counter++, listener);
+    // Object that represents a source of data that 'metrics' can be drawn from
+    analyst.source = function(type, options) {
+      var source = {},
+        cf = crossfilter(),
+        driver = new drivers[type](options),
+        dispatch = d3.dispatch('change'),
+        metricId = 1,
+        timeout;
 
-        return this;
-      },
+      // Check that the driver is installed
+      if (!drivers[type]) {
+        throw new Error("Source type '" + type + "' unknown");
+      }
 
-      fetch: function() {
-        var self = this;
-        this._driver.fetch(function(response) {
-          self._data = self._driver.parse(response);
-          self._dispatch.change.call(self);
+      source.on = function(event, listener) {
+        dispatch.on(event, listener);
+
+        return source;
+      };
+
+      source.fetch = function(callback) {
+        driver.fetch(function(data) {
+          cf.add(data);
+          dispatch.change.call(source);
+
+          if (callback) {
+            callback.call(source);
+          }
         });
-      },
 
-      start: function() {
-      },
+        return source;
+      };
 
-      stop: function() {
-      },
+      source.start = function(interval) {
+        source.stop();
 
-      interval: function() {
-      },
+        // TODO: add logic for fetching only new records
+        timeout = root.setTimeout(function send() {
+          source.fetch(function() {
+            root.setTimeout(send, interval);
+          });
+        }, interval);
 
-      metric: function(field) {
-        return new Metric(this, field);
-      },
+        return source;
+      };
 
-      indexFor: function(field) {
-        return this._driver.indexFor(field);
-      },
-
-      data: function() {
-        return this._data;
-      }
-    };
-
-    // Object encapsualting a single value that is the end result of a set of
-    // manipulations like reducing or shaping
-    var Metric = analyst.metric = function(source, field) {
-      // Enable shorthand `new` omission
-      if (!(this instanceof Metric)) {
-        return new Metric(source, field);
-      }
-
-      var self = this;
-
-      this._stack = [];
-      this._source = source;
-      this._dispatch = d3.dispatch('change');
-
-      // Propagate source changes down to its metrics
-      source.on('change', function() {
-        // Clear value cache
-        delete this._value;
-
-        // Trigger change on listeners
-        self._dispatch.change.call(self);
-      });
-
-      // Add the projection operation if provided
-      if (field) {
-        this.projection(field);
-      }
-    };
-
-    // Combine multiple metrics into a new metric
-    Metric.compose = function() {
-      // TODO: what's the source of a composed metric?
-      // return new Metric();
-    };
-
-    Metric.prototype = {
-      on: function(event, listener) {
-        this._dispatch.on(event, listener);
-
-        return this;
-      },
-
-      // Get the calculated result of the metric
-      value: function() {
-        // The value may be cached, in which case don't bother calculating
-        if (!this._value) {
-          // Send the initial value through the operation pipeline
-          this._value = this._stack.reduce(function(value, func) {
-            return func(value);
-          }, this._source.data());
+      source.stop = function() {
+        if (timeout) {
+          timeout = root.clearTimeout(timeout);
         }
 
-        return this._value;
-      },
+        return source;
+      };
 
-      // Shorthand method for calling Metric.compose() with self as an argument
-      compose: function() {
-        var args = [].slice.call(arguments);
+      // Object encapsualting a single value that is the end result of a set of
+      // manipulations like reducing or shaping
+      source.metric = function(field) {
+        var metric = {},
+          valueFunc,
+          dimension,
+          group,
+          reduceStack = [],
+          shaperStack = [],
+          fieldValue = valueFor(driver.indexFor.bind(driver), field),
+          dispatch = d3.dispatch('change');
 
-        args.unshift(this);
-        return Metric.compose.apply(null, args);
-      },
+        metric.on = function(event, listener) {
+          dispatch.on(event, listener);
+          return metric;
+        };
 
-      // Not strictly a projection, since it's not a set (the output can contain
-      // duplicate values)
-      projection: function() {
-        var args = [].slice.call(arguments),
-          fields = Array.isArray(args[0]) ? args[0] : args,
-          single = fields.length === 1,
-          source = this._source;
+        // Specify how to segment data, results in creating a crossfilter dimension
+        metric.by = function(field) {
+          // If it's a value funciton, pass it straight through, otherwise create
+          // an indexing function
+          valueFunc = isFunc(field) ? field : fieldValue;
+          return metric;
+        };
 
+        metric.reduce = function(funcs) {
+          reduceStack.push(funcs);
 
-        this._stack.push(function(rows) {
-          // translate field names fields
-          var indices = fields.map(function(field) {
-            return source.indexFor(field);
+          return metric;
+        };
+
+        metric.average = function() {
+          return metric;
+        };
+
+        metric.count = function() {
+          reduceStack.push({
+            add: function(memo) {
+              memo.count++;
+            },
+            remove: function(memo) {
+              memo.count--;
+            },
+            initial: function(memo) {
+              memo.count = 0;
+            }
           });
 
-          // TODO: make this safe for non-array values
-          return rows.reduce(function(projection, row, index) {
-            if (single) {
-              // If only a single field was specified, don't wrap it in an array
-              projection.push(row[indices[0]]);
-            } else {
-              // Create a new row that contains only the given columns
-              projection.push(row.reduce(function(subset, value, index) {
-                if (indices.indexOf(index) !== -1) {
-                  subset.push(value);
+          return metric;
+        };
+
+        metric.sum = function() {
+          reduceStack.push({
+            add: function(memo, row) {
+              memo.total += fieldValue(row);
+            },
+            remove: function(memo, row) {
+              memo.total -= fieldValue(row);
+            },
+            initial: function(memo) {
+              memo.total = 0;
+            }
+          });
+
+          return metric;
+        };
+
+        metric.average = function() {
+          metric.count();
+          metric.sum();
+
+          function average(memo, row) {
+            memo.average = memo.count ? memo.total / memo.count : 0;
+          }
+
+          reduceStack.push({
+            add: average,
+            remove: average,
+            initial: function(memo) {
+              memo.average = 0;
+            }
+          });
+
+          return metric;
+        };
+
+        metric.distinct = function() {
+          reduceStack.push({
+            add: function(memo, row) {
+              var value = fieldValue(row);
+              if (value in memo.distincts) {
+                memo.distincts[value]++;
+              } else {
+                memo.distincts[value] = 0;
+                memo.distinctCount++;
+              }
+            },
+            remove: function(memo, row) {
+              var value = fieldValue(row);
+              if (value in memo.distincts) {
+                if (!--memo.distincts[field]) {
+                  delete memo.distincts[field];
+                  memo.distinctCount--;
                 }
-
-                return subset;
-              }, []));
+              }
+            },
+            initial: function(memo) {
+              memo.distincts = [];
+              memo.distinctCount = 0;
             }
+          });
 
-            return projection;
-          }, []);
-        });
+          return metric;
+        };
 
-        return this;
-      },
+        metric.dimension = function() {
+          if (!valueFunc) {
+            return null;
+          }
 
-      reduceSum: function() {
-        this._stack.push(function(values) {
-          return values.reduce(function(sum, value) {
-            return sum + value;
-          }, 0);
-        });
+          return dimension = dimension || cf.dimension(valueFunc);
+        };
 
-        return this;
-      },
+        metric.group = function() {
+          if (!group) {
+            var dimension = metric.dimension();
+            group = dimension ? dimension.group() : cf.groupAll();
 
-      reduceCount: function() {
-        this._stack.push(function(values) {
-          return values.reduce(function(count) {
-            return count++;
-          }, 0);
-        });
-
-        return this;
-      },
-
-      reduceDistinct: function() {
-        this._stack.push(function(values) {
-          var distincts = [];
-
-          return values.reduce(function(count, value) {
-            if (distincts.indexOf(value) === -1) {
-              distincts.push(value);
-              count++;
+            if (reduceStack) {
+              group.reduce(function(memo, row) {
+                return reduceStack.reduce(function(p, reduction) {
+                  reduction.add(p, row);
+                  return p;
+                }, memo);
+              }, function(memo, row) {
+                return reduceStack.reduce(function(p, reduction) {
+                  reduction.remove(p, row);
+                  return p;
+                }, memo);
+              }, function() {
+                return reduceStack.reduce(function(p, reduction) {
+                  reduction.initial(p);
+                  return p;
+                }, {});
+              });
             }
+          }
 
-            return count;
-          }, 0);
+          return group;
+        };
+
+        // Get the calculated result of the metric
+        metric.value = function() {
+          var group = metric.group(),
+            value = group[group.value ? 'value' : 'all']();
+
+          return shaperStack.reduce(function(value, shaper) {
+            return shaper(value);
+          }, value);
+        },
+
+        // Extract a single value from the result, or each result
+        metric.extract = function(field) {
+          shaperStack.push(function(value) {
+            var valueFunc = valueAt(field);
+            return Array.isArray(value) ? value.map(valueFunc) : valueFunc(value);
+          });
+
+          return metric;
+        },
+
+        // Propagate source changes down to its metrics
+        // Add a unique 'name' to the event so as not to clobber other listeners
+        source.on('change.' + metricId++, function() {
+          // Trigger change on listeners
+          dispatch.change.call(metric);
         });
 
-        return this;
-      },
+        return metric;
+      };
 
-      reduceAverage: function() {
-        this._stack.push(function(values) {
-          var count = values.length,
-            total = values.reduce(function(sum, value) {
-              return sum + value;
-            }, 0);
-
-          return total / count;
-        });
-
-        return this;
-      },
-
-      reduceSumDistinct: function() {
-        return this;
-      }
+      return source;
     };
 
-    // Aliases
-    Metric.prototype.project = Metric.prototype.projection;
+    // Utilities
 
-    // Fix the `constructor` property
-    var classes = [ Source, Metric ];
-    for (var i in classes) {
-      classes[i].prototype.constructor = classes[i];
+    // Checks if the object is a function
+    // Note: this fails for regexes in V8 (which is good enough)
+    function isFunc(obj) {
+      return typeof obj === 'function';
+    }
+
+    // Returns a function that returns the value of the first arg at the index given
+    // by the specified field and field mapping
+    function valueFor(mapFunc, field) {
+      return function(d) {
+        return d[mapFunc(field)];
+      };
+    }
+
+    // Returns a function that returns the value of the first arg at the given index
+    function valueAt(index) {
+      return function(d) {
+        return d[index];
+      };
     }
   }());
 
@@ -262,4 +303,4 @@
     // Normal global
     root['analyst'] = analyst;
   }
-}(d3));
+}());
