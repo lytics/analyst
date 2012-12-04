@@ -86,13 +86,19 @@
       // manipulations like reducing or shaping
       source.metric = function(field) {
         var metric = {},
-          valueFunc,
           dimension,
           group,
           reduceStack = [],
           shaperStack = [],
-          fieldValue = valueFor(driver.indexFor.bind(driver), field),
+          indexFor = driver.indexFor.bind(driver),
+          fieldValue = valueFor(indexFor, field),
           dispatch = d3.dispatch('change');
+
+        function applyShapers(initial) {
+          return shaperStack.reduce(function(value, shaper) {
+            return shaper(value);
+          }, initial);
+        }
 
         metric.on = function(event, listener) {
           dispatch.on(event, listener);
@@ -103,7 +109,7 @@
         metric.by = function(field) {
           // If it's a value funciton, pass it straight through, otherwise create
           // an indexing function
-          valueFunc = isFunc(field) ? field : fieldValue;
+          dimension = cf.dimension(isFunc(field) ? field : fieldValue);
           return metric;
         };
 
@@ -198,35 +204,49 @@
         };
 
         metric.dimension = function() {
-          if (!valueFunc) {
-            return null;
-          }
-
-          return dimension = dimension || cf.dimension(valueFunc);
+          return dimension;
         };
 
         metric.group = function() {
           if (!group) {
-            var dimension = metric.dimension();
-            group = dimension ? dimension.group() : cf.groupAll();
+            var dimension = metric.dimension(),
+              cfGroup = dimension ? dimension.group() : cf.groupAll();
 
-            if (reduceStack) {
-              group.reduce(function(memo, row) {
-                return reduceStack.reduce(function(p, reduction) {
-                  reduction.add(p, row);
-                  return p;
-                }, memo);
-              }, function(memo, row) {
-                return reduceStack.reduce(function(p, reduction) {
-                  reduction.remove(p, row);
-                  return p;
-                }, memo);
-              }, function() {
-                return reduceStack.reduce(function(p, reduction) {
-                  reduction.initial(p);
-                  return p;
-                }, {});
-              });
+            cfGroup.reduce(function(memo, row) {
+              return reduceStack.reduce(function(p, reduction) {
+                reduction.add(p, row);
+                return p;
+              }, memo);
+            }, function(memo, row) {
+              return reduceStack.reduce(function(p, reduction) {
+                reduction.remove(p, row);
+                return p;
+              }, memo);
+            }, function() {
+              return reduceStack.reduce(function(p, reduction) {
+                reduction.initial(p);
+                return p;
+              }, {});
+            });
+
+            // Create a wrapper around the group that applies shaping functions
+            if (cfGroup.all) {
+              group = {
+                all: function() {
+                  return cfGroup.all().map(function(result) {
+                    return {
+                      key: result.key,
+                      value: applyShapers(result.value)
+                    };
+                  });
+                }
+              };
+            } else {
+              group = {
+                value: function() {
+                  return applyShapers(cfGroup.value());
+                }
+              };
             }
           }
 
@@ -235,23 +255,15 @@
 
         // Get the calculated result of the metric
         metric.value = function() {
-          var group = metric.group(),
-            value = group[group.value ? 'value' : 'all']();
-
-          return shaperStack.reduce(function(value, shaper) {
-            return shaper(value);
-          }, value);
-        },
+          var group = metric.group();
+          return group[group.value ? 'value' : 'all']();
+        };
 
         // Extract a single value from the result, or each result
         metric.extract = function(field) {
-          shaperStack.push(function(value) {
-            var valueFunc = valueAt(field);
-            return Array.isArray(value) ? value.map(valueFunc) : valueFunc(value);
-          });
-
+          shaperStack.push(valueAt(field));
           return metric;
-        },
+        };
 
         // Propagate source changes down to its metrics
         // Add a unique 'name' to the event so as not to clobber other listeners
