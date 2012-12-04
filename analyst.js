@@ -92,6 +92,7 @@
           shaperStack = [],
           indexFor = driver.indexFor.bind(driver),
           fieldValue = valueFor(indexFor, field),
+          dateValue = valueFor(indexFor, '_date'),
           dispatch = d3.dispatch('change');
 
         function applyShapers(initial) {
@@ -112,6 +113,16 @@
           dimension = cf.dimension(isFunc(field) ? field : fieldValue);
           return metric;
         };
+
+        [ 'hour', 'day', 'week', 'month' ].forEach(function(interval) {
+          var methodName = 'by' + interval.charAt(0).toUpperCase() + interval.slice(1);
+
+          metric[methodName] = function() {
+            return metric.by(function(d) {
+              return d3.time[interval](dateValue(d));
+            });
+          };
+        });
 
         metric.reduce = function(funcs) {
           reduceStack.push(funcs);

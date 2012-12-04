@@ -36,6 +36,7 @@
             });
 
             // Timestamp last
+            fields._date = offset + measures.length;
             fields._ts = offset + measures.length;
 
             self.fields = fields;
@@ -44,12 +45,12 @@
           // Parse data
           if (response.data) {
             response.data.forEach(function(segment) {
-              var ts = segment._ts;
-
-              // Add a native JS date to the timestamp
-              ts.date = new Date(ts.ts * 1000);
+              var ts = segment._ts,
+                date = new Date(ts.ts * 1000);
 
               segment.rows.forEach(function(row, index) {
+                // Add a native JS date and timestamp to the row
+                row.push(date);
                 row.push(ts);
                 data.push(row);
               });
