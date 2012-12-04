@@ -270,9 +270,23 @@
           return group[group.value ? 'value' : 'all']();
         };
 
+        metric.extent = function() {
+          if (!dimension) {
+            return null;
+          }
+
+          var domain = metric.group().all().map(valueAt('key'));
+          return d3.extent(domain);
+        };
+
         // Extract a single value from the result, or each result
         metric.extract = function(field) {
           shaperStack.push(valueAt(field));
+          return metric;
+        };
+
+        metric.shape = function(shaper) {
+          shaperStack.push(shaper);
           return metric;
         };
 
