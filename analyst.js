@@ -1,343 +1,401 @@
-/*jshint sub:true, boss:true*/
 (function() {
-  // 'Root' object, `window` in browsers, `global` in Node
-  var root = this,
-    d3 = root.d3,
-    crossfilter = root.crossfilter;
-
-  // Namespace object
-  var analyst = {};
-
+  var root = this, d3 = root.d3, crossfilter = root.crossfilter;
+  var analyst = {
+    version: "0.1.0"
+  };
   (function() {
-    'use strict';
-
-    // Internal list of available drivers
+    "use strict";
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+    function is(type) {
+      var constructor = capitalize(type);
+      return function(obj) {
+        return Object.prototype.toString.call(obj) === "[object " + constructor + "]";
+      };
+    }
+    function zero() {
+      return 0;
+    }
+    function object() {
+      return {};
+    }
+    function fieldName(field, modifier) {
+      return (field ? field + "." : "") + modifier;
+    }
+    function valueFor(indexer, field) {
+      if (isFunction(field)) {
+        return function(d) {
+          return field(d, indexer);
+        };
+      }
+      return function(d) {
+        var index = indexer(field);
+        return index !== null ? d[index] : null;
+      };
+    }
+    function valueAt(index) {
+      return function(d) {
+        return d[index];
+      };
+    }
     var drivers = {};
-
-    // Add a source adapter implementation
     analyst.addDriver = function(name, driver) {
-      var constructor = driver.hasOwnProperty('constructor') ? driver.constructor : Driver;
-
-      // Default driver constructor, just saves options
       function Driver(options) {
         this.options = options;
       }
-
+      var constructor = driver.hasOwnProperty("constructor") ? driver.constructor : Driver;
       constructor.prototype = driver;
-
       drivers[name] = constructor;
     };
-
-    // Object that represents a source of data that 'metrics' can be drawn from
     analyst.source = function(type, options) {
-      var source = {},
-        cf = crossfilter(),
-        driver = new drivers[type](options),
-        dispatch = d3.dispatch('change'),
-        metricId = 1,
-        timeout;
-
-      // Check that the driver is installed
+      function getDimension(value) {
+        if (!dimensions[value]) {
+          var dimension = cf.dimension(valueFor(indexFor, value)), filter = dimension.filter;
+          dimension.filter = function(value) {
+            filter.call(dimension, value);
+            dimension._value = value;
+            dispatch.filter.call(dimension);
+            return dimension;
+          };
+          dimension._value = null;
+          dimensions[value] = dimension;
+        }
+        return dimensions[value];
+      }
       if (!drivers[type]) {
         throw new Error("Source type '" + type + "' unknown");
       }
-
+      var source = {}, filterStack = [], cf = crossfilter(), dimensions = {}, driver = new drivers[type](options), indexFor = driver.indexFor.bind(driver), dispatch = d3.dispatch("ready", "change", "filter"), metricId = 1, timeout;
       source.on = function(event, listener) {
         dispatch.on(event, listener);
-
         return source;
       };
-
+      source.filter = function(filter) {
+        filterStack.push(valueFor(indexFor, filter));
+        return source;
+      };
       source.fetch = function(callback) {
         driver.fetch(function(data) {
-          cf.add(data);
+          var ready = !cf.size();
+          cf.add(filterStack.reduce(function(data, filter) {
+            return data.filter(filter);
+          }, data));
+          if (ready) {
+            dispatch.ready.call(source);
+          }
           dispatch.change.call(source);
-
           if (callback) {
             callback.call(source);
           }
         });
-
         return source;
       };
-
       source.start = function(interval) {
         source.stop();
-
-        // TODO: add logic for fetching only new records
         timeout = root.setTimeout(function send() {
           source.fetch(function() {
             root.setTimeout(send, interval);
           });
         }, interval);
-
         return source;
       };
-
       source.stop = function() {
         if (timeout) {
           timeout = root.clearTimeout(timeout);
         }
-
         return source;
       };
-
-      // Object encapsualting a single value that is the end result of a set of
-      // manipulations like reducing or shaping
-      source.metric = function(field) {
-        var metric = {},
-          dimension,
-          group,
-          reduceStack = [],
-          shaperStack = [],
-          indexFor = driver.indexFor.bind(driver),
-          fieldValue = valueFor(indexFor, field),
-          dateValue = valueFor(indexFor, '_date'),
-          dispatch = d3.dispatch('change');
-
-        function applyShapers(initial) {
-          return shaperStack.reduce(function(value, shaper) {
-            return shaper(value);
-          }, initial);
+      source.metric = function() {
+        function applyAliases(output) {
+          var fields = keys(outputFields);
+          return fields.length ? fields.reduce(function(data, field) {
+            data[outputFields[field]] = output[field];
+            return data;
+          }, {}) : output;
         }
-
+        function applyTransforms(initial) {
+          var fields = keys(outputFields), output = transformStack.reduce(function(v, transform) {
+            return transform(v);
+          }, initial);
+          return fields.length === 1 ? output[fields[0]] : output;
+        }
+        function applyReduce(type) {
+          return function(result, d) {
+            return reduceStack.reduce(function(data, reduction) {
+              data[reduction.field] = reduction[type](data[reduction.field], d);
+              return data;
+            }, result || {});
+          };
+        }
+        function addReduce(reduce, suffix) {
+          return function(field) {
+            var transforms = slice(arguments, 1), outputField = fieldName(field, suffix), alias = isFunction(transforms[0]) ? outputField : transforms.shift() || outputField;
+            outputFields[outputField] = alias;
+            transforms.forEach(function(transform) {
+              transformStack.push(function(d) {
+                d[alias] = transform(d[alias]);
+                return d;
+              });
+            });
+            return reduce(field, outputField);
+          };
+        }
+        function countReduce() {
+          return metric.reduce(function(count) {
+            return count + 1;
+          }, function(count) {
+            return count - 1;
+          }, zero, "count");
+        }
+        function sumReduce(field, outputField) {
+          var value = valueFor(indexFor, field);
+          return metric.reduce(function(sum, d) {
+            return sum + value(d);
+          }, function(sum, d) {
+            return sum - value(d);
+          }, zero, outputField);
+        }
+        function averageReduce(field, outputField) {
+          var totalField = fieldName(field, "total");
+          if (!(outputField in applyInitial())) {
+            countReduce();
+            sumReduce(field, totalField);
+            transformStack.unshift(function(d) {
+              d[outputField] = d.count ? d[totalField] / d.count : 0;
+              return d;
+            });
+          }
+          return metric;
+        }
+        function distinctReduce(field, outputField) {
+          var value = valueFor(indexFor, field);
+          return metric.reduce(function(distinct, d) {
+            var v = value(d);
+            if (v in distinct) {
+              distinct[v]++;
+            } else {
+              distinct[v] = 1;
+            }
+            return distinct;
+          }, function(distinct, d) {
+            var v = value(d);
+            if (v in distinct) {
+              distinct[v]--;
+              if (!distinct[v]) {
+                delete distinct[v];
+              }
+            }
+            return distinct;
+          }, object, outputField);
+        }
+        function distinctCountReduce(field, outputField) {
+          var value = valueFor(indexFor, field), distinctsField = fieldName(field, "distincts");
+          if (!(outputField in applyInitial())) {
+            distinctReduce(field, distinctsField);
+            transformStack.unshift(function(d) {
+              d[outputField] = keys(d[distinctsField]).length;
+              return d;
+            });
+          }
+          return metric;
+        }
+        var metric = {}, dimension, group, outputFields = {}, reduceStack = [], transformStack = [ applyAliases ], dateValue = valueFor(indexFor, "_date"), applyAdd = applyReduce("add"), applyRemove = applyReduce("remove"), applyInitial = applyReduce("initial"), dispatch = d3.dispatch("ready", "change");
         metric.on = function(event, listener) {
           dispatch.on(event, listener);
           return metric;
         };
-
-        // Specify how to segment data, results in creating a crossfilter dimension
         metric.by = function(field) {
-          // If it's a value funciton, pass it straight through, otherwise create
-          // an indexing function
-          dimension = cf.dimension(isFunc(field) ? field : fieldValue);
+          if (dimension) {
+            throw new Error("A metric can only be dimensioned once");
+          }
+          dimension = getDimension(field);
           return metric;
         };
-
-        [ 'hour', 'day', 'week', 'month' ].forEach(function(interval) {
-          var methodName = 'by' + interval.charAt(0).toUpperCase() + interval.slice(1);
-
+        [ "hour", "day", "week", "month" ].forEach(function(interval) {
+          var methodName = "by" + capitalize(interval);
           metric[methodName] = function() {
             return metric.by(function(d) {
               return d3.time[interval](dateValue(d));
             });
           };
         });
-
-        metric.reduce = function(funcs) {
-          reduceStack.push(funcs);
-
-          return metric;
-        };
-
-        metric.average = function() {
-          return metric;
-        };
-
-        metric.count = function() {
-          reduceStack.push({
-            add: function(memo) {
-              memo.count++;
-            },
-            remove: function(memo) {
-              memo.count--;
-            },
-            initial: function(memo) {
-              memo.count = 0;
-            }
+        metric.byDate = function(value) {
+          return metric.by(function(d) {
+            return value(dateValue(d));
           });
-
-          return metric;
         };
-
-        metric.sum = function() {
-          reduceStack.push({
-            add: function(memo, row) {
-              memo.total += fieldValue(row);
-            },
-            remove: function(memo, row) {
-              memo.total -= fieldValue(row);
-            },
-            initial: function(memo) {
-              memo.total = 0;
-            }
+        metric.byDateFormat = function(formatStr) {
+          var format = d3.time.format(formatStr);
+          return metric.by(function(d) {
+            return format(dateValue(d));
           });
-
-          return metric;
         };
-
-        metric.average = function() {
-          metric.count();
-          metric.sum();
-
-          function average(memo, row) {
-            memo.average = memo.count ? memo.total / memo.count : 0;
+        metric.byDayOfWeek = function(string, abbr) {
+          string = string === undefined || string;
+          return string ? metric.byDateFormat(abbr ? "%a" : "%A") : function(d) {
+            return dateValue(d).getDay();
+          };
+        };
+        metric.byHourOfDay = function() {
+          return metric.by(function(d) {
+            return dateValue(d).getHours();
+          });
+        };
+        metric.reduce = function(reduceAdd, reduceRemove, initialValue, outputField) {
+          outputField = outputField || "output";
+          if (!(outputField in applyInitial())) {
+            reduceStack.push({
+              add: reduceAdd,
+              remove: reduceRemove,
+              initial: initialValue,
+              field: outputField
+            });
           }
-
-          reduceStack.push({
-            add: average,
-            remove: average,
-            initial: function(memo) {
-              memo.average = 0;
-            }
-          });
-
           return metric;
         };
-
-        metric.distinct = function() {
-          reduceStack.push({
-            add: function(memo, row) {
-              var value = fieldValue(row);
-              if (value in memo.distincts) {
-                memo.distincts[value]++;
-              } else {
-                memo.distincts[value] = 0;
-                memo.distinctCount++;
-              }
-            },
-            remove: function(memo, row) {
-              var value = fieldValue(row);
-              if (value in memo.distincts) {
-                if (!--memo.distincts[field]) {
-                  delete memo.distincts[field];
-                  memo.distinctCount--;
-                }
-              }
-            },
-            initial: function(memo) {
-              memo.distincts = [];
-              memo.distinctCount = 0;
-            }
-          });
-
-          return metric;
-        };
-
+        metric.count = addReduce(countReduce);
+        metric.sum = addReduce(sumReduce, "total");
+        metric.average = addReduce(averageReduce, "average");
+        metric.distinct = addReduce(distinctReduce, "distincts");
+        metric.distinctCount = addReduce(distinctCountReduce, "distinct_total");
         metric.dimension = function() {
           return dimension;
         };
-
+        metric.filter = function(value) {
+          if (!dimension) {
+            throw new Error("A metric can only be filtered after being dimensioned");
+          }
+          return value === undefined ? dimension._value : dimension.filter.call(dimension, value);
+        };
         metric.group = function() {
           if (!group) {
-            var dimension = metric.dimension(),
-              cfGroup = dimension ? dimension.group() : cf.groupAll();
-
-            cfGroup.reduce(function(memo, row) {
-              return reduceStack.reduce(function(p, reduction) {
-                reduction.add(p, row);
-                return p;
-              }, memo);
-            }, function(memo, row) {
-              return reduceStack.reduce(function(p, reduction) {
-                reduction.remove(p, row);
-                return p;
-              }, memo);
-            }, function() {
-              return reduceStack.reduce(function(p, reduction) {
-                reduction.initial(p);
-                return p;
-              }, {});
-            });
-
-            // Create a wrapper around the group that applies shaping functions
-            if (cfGroup.all) {
-              group = {
-                all: function() {
-                  return cfGroup.all().map(function(result) {
-                    return {
-                      key: result.key,
-                      value: applyShapers(result.value)
-                    };
-                  });
-                }
+            group = dimension ? dimension.group() : cf.groupAll();
+            if (reduceStack.length) {
+              group.reduce(applyAdd, applyRemove, applyInitial);
+            }
+            if (group.all) {
+              var all = group.all;
+              group.all = function() {
+                return all.call(group).map(function(result) {
+                  return {
+                    key: result.key,
+                    value: applyTransforms(result.value)
+                  };
+                });
               };
             } else {
-              group = {
-                value: function() {
-                  return applyShapers(cfGroup.value());
-                }
+              var value = group.value;
+              group.value = function() {
+                return applyTransforms(value.call(group));
               };
             }
           }
-
           return group;
         };
-
-        // Get the calculated result of the metric
         metric.value = function() {
           var group = metric.group();
-          return group[group.value ? 'value' : 'all']();
+          return group[group.value ? "value" : "all"]();
         };
-
-        metric.extent = function() {
+        metric.domain = function() {
           if (!dimension) {
             return null;
           }
-
-          var domain = metric.group().all().map(valueAt('key'));
-          return d3.extent(domain);
+          return metric.group().all().map(valueAt("key"));
         };
-
-        // Extract a single value from the result, or each result
         metric.extract = function(field) {
-          shaperStack.push(valueAt(field));
+          transformStack.push(valueAt(field));
           return metric;
         };
-
-        metric.shape = function(shaper) {
-          shaperStack.push(shaper);
+        metric.transform = function(transform) {
+          var transforms = slice(arguments);
+          transformStack = transformStack.concat(transforms);
           return metric;
         };
-
-        // Propagate source changes down to its metrics
-        // Add a unique 'name' to the event so as not to clobber other listeners
-        source.on('change.' + metricId++, function() {
-          // Trigger change on listeners
+        source.on("change." + metricId, function() {
           dispatch.change.call(metric);
         });
-
+        source.on("ready." + metricId, function() {
+          dispatch.ready.call(metric);
+        });
+        source.on("filter." + metricId, function(filteredDimension) {
+          if (!dimension || filteredDimension !== dimension) {
+            dispatch.change.call(metric);
+          }
+        });
+        metricId++;
         return metric;
       };
-
       return source;
     };
-
-    // Utilities
-
-    // Checks if the object is a function
-    // Note: this fails for regexes in V8 (which is good enough)
-    function isFunc(obj) {
-      return typeof obj === 'function';
-    }
-
-    // Returns a function that returns the value of the first arg at the index given
-    // by the specified field and field mapping
-    function valueFor(mapFunc, field) {
-      return function(d) {
-        return d[mapFunc(field)];
+    var slice = Function.prototype.call.bind(Array.prototype.slice);
+    var keys = Object.keys;
+    var isFunction = is("function");
+    var isObject = is("object");
+    var isArray = Array.isArray;
+  })();
+  analyst.addDriver("lytics", {
+    fetch: function(callback) {
+      var self = this, options = this.options, baseUrl = options.url || "//api.lytics.io", url = baseUrl + "/api/q/" + options.query, data = options.data || {}, params = [];
+      var script = document.createElement("script");
+      var cbName = "analyst_lytics_" + (new Date).getTime();
+      params.push("callback=" + cbName);
+      Object.keys(data).forEach(function(key) {
+        params.push(key + "=" + data[key]);
+      });
+      if (params.length) {
+        url += "?" + params.join("&");
+      }
+      var handleResponse = function(response) {
+        var data = [];
+        if (response.meta) {
+          var dimensions = response.meta.dimensions, measures = response.meta.measures, fields = {};
+          offset = 1;
+          if (dimensions && dimensions.length > 0) {
+            dimensions.forEach(function(field, index) {
+              fields[field] = index;
+            });
+            offset = dimensions.length;
+          } else {
+            fields._ = 0;
+          }
+          measures.forEach(function(measure, index) {
+            fields[measure.As] = index + offset;
+          });
+          fields._ts = offset + measures.length;
+          fields._date = fields._ts + 1;
+          self.fields = fields;
+        }
+        if (response.data) {
+          response.data.forEach(function(segment) {
+            var ts = segment._ts, date = new Date(ts.ts * 1e3);
+            segment.rows.forEach(function(row, index) {
+              row.push(ts.ts);
+              row.push(date);
+              data.push(row);
+            });
+          });
+        }
+        callback(data);
+        delete root[cbName];
+        script.remove();
       };
+      script.src = url;
+      root[cbName] = handleResponse;
+      document.body.appendChild(script);
+    },
+    indexFor: function(field) {
+      var fields = this.fields;
+      return fields && field in fields ? fields[field] : null;
     }
-
-    // Returns a function that returns the value of the first arg at the given index
-    function valueAt(index) {
-      return function(d) {
-        return d[index];
-      };
-    }
-  }());
-
-  // Module export
-  if (typeof exports !== 'undefined') {
-    // CommonJS
+  });
+  if (typeof exports !== "undefined") {
     exports.analyst = analyst;
-  } else if (typeof define === 'function' && define.amd) {
-    // AMD using a named module
-    define('analyst', function() {
+  } else if (typeof define === "function" && define.amd) {
+    define("analyst", function() {
       return analyst;
     });
   } else {
-    // Normal global
-    root['analyst'] = analyst;
+    root["analyst"] = analyst;
   }
-}());
+})();
