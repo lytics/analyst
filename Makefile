@@ -9,6 +9,15 @@ all: \
 	analyst.js \
 	analyst.min.js
 
+full: \
+	analyst.embed.js \
+	analyst.embed.min.js
+
+analyst.embed.js: \
+  lib/d3/d3.v2.js \
+  lib/crossfilter/crossfilter.js \
+  analyst.js
+
 .INTERMEDIATE analyst.js: \
 	src/start.js \
 	src/analyst.js \
