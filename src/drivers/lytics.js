@@ -3,7 +3,7 @@ analyst.addDriver('lytics', {
     var self = this,
       options = this.options,
       baseUrl = options.url || '//api.lytics.io',
-      url = baseUrl + '/api/q/' + options.query,
+      url = baseUrl + '/api/' + (options.clientId ? options.clientId + '/' : '') + options.query,
       data = options.data || {},
       params = [];
 

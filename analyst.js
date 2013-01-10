@@ -336,7 +336,7 @@
   })();
   analyst.addDriver("lytics", {
     fetch: function(callback) {
-      var self = this, options = this.options, baseUrl = options.url || "//api.lytics.io", url = baseUrl + "/api/q/" + options.query, data = options.data || {}, params = [];
+      var self = this, options = this.options, baseUrl = options.url || "//api.lytics.io", url = baseUrl + "/api/" + (options.clientId ? options.clientId + "/" : "") + options.query, data = options.data || {}, params = [];
       var script = document.createElement("script");
       var cbName = "analyst_lytics_" + (new Date).getTime();
       params.push("callback=" + cbName);
