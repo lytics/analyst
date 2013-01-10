@@ -222,7 +222,7 @@
         });
         metric.byDate = function(value) {
           return metric.by(function(d) {
-            return value(dateValue(d));
+            return value ? value(dateValue(d)) : dateValue(d);
           });
         };
         metric.byDateFormat = function(formatStr) {
