@@ -60,7 +60,7 @@ var analyst = {
         dimension.filter = function(value) {
           filter.call(dimension, value);
           dimension._value = value;
-          dispatch.filter.call(dimension);
+          dispatch.filter.call(source, dimension, value);
           return dimension;
         };
 
@@ -143,7 +143,7 @@ var analyst = {
         applyAdd = applyReduce('add'),
         applyRemove = applyReduce('remove'),
         applyInitial = applyReduce('initial'),
-        dispatch = d3.dispatch('ready', 'change');
+        dispatch = d3.dispatch('ready', 'change', 'filter');
 
       // Create a new output object that contains only the fields specified
       // by the reduce functions applied
@@ -467,7 +467,9 @@ var analyst = {
       });
 
       // Trigger an update if necessary when a filter is applied
-      source.on('filter.' + metricId, function(filteredDimension) {
+      source.on('filter.' + metricId, function(filteredDimension, filterValue) {
+        dispatch.filter.call(metric, filteredDimension, filterValue);
+
         // If this metric's dimension was filtered, then the metric won't change
         if (!dimension || filteredDimension !== dimension) {
           dispatch.change.call(metric);
