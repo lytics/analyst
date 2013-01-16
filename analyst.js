@@ -1,4 +1,68 @@
 (function() {
+  function addEventHandling(target) {
+    var callbacks = {};
+    target.on = function(events, callback, context) {
+      var event, node, tail, list;
+      if (!callback) return target;
+      events = events.split(eventSplitter);
+      while (event = events.shift()) {
+        list = callbacks[event];
+        node = list ? list.tail : {};
+        node.next = tail = {};
+        node.context = context;
+        node.callback = callback;
+        callbacks[event] = {
+          tail: tail,
+          next: list ? list.next : node
+        };
+      }
+      return target;
+    };
+    target.off = function(events, callback, context) {
+      var event, node, tail, cb, ctx;
+      if (!(events || callback || context)) {
+        callbacks = {};
+        return target;
+      }
+      events = events ? events.split(eventSplitter) : _.keys(callbacks);
+      while (event = events.shift()) {
+        node = callbacks[event];
+        delete callbacks[event];
+        if (!node || !(callback || context)) continue;
+        tail = node.tail;
+        while ((node = node.next) !== tail) {
+          cb = node.callback;
+          ctx = node.context;
+          if (callback && cb !== callback || context && ctx !== context) {
+            target.on(event, cb, ctx);
+          }
+        }
+      }
+      return target;
+    };
+    target.trigger = function(events) {
+      var event, node, tail, args, all, rest;
+      all = callbacks.all;
+      events = events.split(eventSplitter);
+      rest = [].slice.call(arguments, 1);
+      while (event = events.shift()) {
+        if (node = callbacks[event]) {
+          tail = node.tail;
+          while ((node = node.next) !== tail) {
+            node.callback.apply(node.context || target, rest);
+          }
+        }
+        if (node = all) {
+          tail = node.tail;
+          args = [ event ].concat(rest);
+          while ((node = node.next) !== tail) {
+            node.callback.apply(node.context || target, args);
+          }
+        }
+      }
+      return target;
+    };
+  }
   var root = this, d3 = root.d3, crossfilter = root.crossfilter;
   var analyst = {
     version: "0.1.0"
@@ -54,7 +118,7 @@
           dimension.filter = function(value) {
             filter.call(dimension, value);
             dimension._value = value;
-            dispatch.filter.call(source, dimension, value);
+            source.trigger("filter", dimension, value);
             return dimension;
           };
           dimension._value = null;
@@ -65,11 +129,8 @@
       if (!drivers[type]) {
         throw new Error("Source type '" + type + "' unknown");
       }
-      var source = {}, filterStack = [], fieldMap = {}, cf = crossfilter(), dimensions = {}, driver = drivers[type].apply(source, slice(arguments, 1)), dispatch = d3.dispatch("ready", "change", "filter"), metricId = 1, timeout;
-      source.on = function(event, listener) {
-        dispatch.on(event, listener);
-        return source;
-      };
+      var source = {}, filterStack = [], fieldMap = {}, cf = crossfilter(), dimensions = {}, driver = drivers[type].apply(source, slice(arguments, 1)), timeout;
+      addEventHandling(source);
       source.filter = function(filter) {
         filterStack.push(valueFor(indexFor, filter));
         return source;
@@ -80,9 +141,9 @@
           return data.filter(filter);
         }, data));
         if (ready) {
-          dispatch.ready.call(source);
+          source.trigger("ready");
         }
-        dispatch.change.call(source);
+        source.trigger("change");
       };
       source.fieldMap = function(map) {
         if (!arguments.length) {
@@ -204,11 +265,8 @@
           }
           return metric;
         }
-        var metric = {}, dimension, group, outputFields = {}, reduceStack = [], transformStack = [ applyAliases ], dateValue = valueFor(indexFor, "_date"), applyAdd = applyReduce("add"), applyRemove = applyReduce("remove"), applyInitial = applyReduce("initial"), dispatch = d3.dispatch("ready", "change", "filter");
-        metric.on = function(event, listener) {
-          dispatch.on(event, listener);
-          return metric;
-        };
+        var metric = {}, dimension, group, outputFields = {}, reduceStack = [], transformStack = [ applyAliases ], dateValue = valueFor(indexFor, "_date"), applyAdd = applyReduce("add"), applyRemove = applyReduce("remove"), applyInitial = applyReduce("initial");
+        addEventHandling(metric);
         metric.by = function(field) {
           if (dimension) {
             throw new Error("A metric can only be dimensioned once");
@@ -316,19 +374,17 @@
           transformStack = transformStack.concat(transforms);
           return metric;
         };
-        source.on("change." + metricId, function() {
-          dispatch.change.call(metric);
+        [ "ready", "change", "filter" ].forEach(function(event) {
+          source.on(event, function() {
+            var args = [ event ].concat(slice(arguments));
+            metric.trigger.apply(metric, args);
+          });
         });
-        source.on("ready." + metricId, function() {
-          dispatch.ready.call(metric);
-        });
-        source.on("filter." + metricId, function(filteredDimension, filterValue) {
-          dispatch.filter.call(metric, filteredDimension, filterValue);
+        source.on("filter", function(filteredDimension, filterValue) {
           if (!dimension || filteredDimension !== dimension) {
-            dispatch.change.call(metric);
+            metric.trigger("change");
           }
         });
-        metricId++;
         return metric;
       };
       return source;
@@ -339,6 +395,7 @@
     var isObject = is("object");
     var isArray = Array.isArray;
   })();
+  var eventSplitter = /\s+/;
   analyst.addDriver("lytics", function(options) {
     var source = this;
     options = options || {};

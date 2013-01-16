@@ -21,6 +21,7 @@ analyst.embed.js: \
 .INTERMEDIATE analyst.js: \
 	src/start.js \
 	src/analyst.js \
+	src/events.js \
 	analyst.drivers.js \
 	src/export.js \
 	src/end.js

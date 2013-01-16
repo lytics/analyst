@@ -33,8 +33,6 @@ var analyst = {
       cf = crossfilter(),
       dimensions = {},
       driver = drivers[type].apply(source, slice(arguments, 1)),
-      dispatch = d3.dispatch('ready', 'change', 'filter'),
-      metricId = 1,
       timeout;
 
     function indexFor(field) {
@@ -55,7 +53,7 @@ var analyst = {
         dimension.filter = function(value) {
           filter.call(dimension, value);
           dimension._value = value;
-          dispatch.filter.call(source, dimension, value);
+          source.trigger('filter', dimension, value);
           return dimension;
         };
 
@@ -68,11 +66,8 @@ var analyst = {
       return dimensions[value];
     }
 
-    source.on = function(event, listener) {
-      dispatch.on(event, listener);
-
-      return source;
-    };
+    // Add `on`, `off`, and `trigger` methods for handling events
+    addEventHandling(source);
 
     source.filter = function(filter) {
       filterStack.push(valueFor(indexFor, filter));
@@ -89,11 +84,11 @@ var analyst = {
 
       // Notify of initial data load
       if (ready) {
-        dispatch.ready.call(source);
+        source.trigger('ready');
       }
 
       // Notify of changes to the underlying data
-      dispatch.change.call(source);
+      source.trigger('change');
     };
 
     source.fieldMap = function(map) {
@@ -144,8 +139,7 @@ var analyst = {
         dateValue = valueFor(indexFor, '_date'),
         applyAdd = applyReduce('add'),
         applyRemove = applyReduce('remove'),
-        applyInitial = applyReduce('initial'),
-        dispatch = d3.dispatch('ready', 'change', 'filter');
+        applyInitial = applyReduce('initial');
 
       // Create a new output object that contains only the fields specified
       // by the reduce functions applied
@@ -182,10 +176,8 @@ var analyst = {
         };
       }
 
-      metric.on = function(event, listener) {
-        dispatch.on(event, listener);
-        return metric;
-      };
+      // Add `on`, `off`, and `trigger` methods for handling events
+      addEventHandling(metric);
 
       // Specify how to segment data, results in creating a crossfilter dimension
       metric.by = function(field) {
@@ -456,30 +448,21 @@ var analyst = {
         return metric;
       };
 
-      // Propagate source changes down to its metrics
-      // Add a unique 'name' to the event so as not to clobber other listeners
-      source.on('change.' + metricId, function() {
-        // Trigger change on listeners
-        dispatch.change.call(metric);
-      });
-
-      source.on('ready.' + metricId, function() {
-        // Trigger change on listeners
-        dispatch.ready.call(metric);
+      // Propagate source events down to its metrics
+      [ 'ready', 'change', 'filter' ].forEach(function(event) {
+        source.on(event, function() {
+          var args = [ event ].concat(slice(arguments));
+          metric.trigger.apply(metric, args);
+        });
       });
 
       // Trigger an update if necessary when a filter is applied
-      source.on('filter.' + metricId, function(filteredDimension, filterValue) {
-        dispatch.filter.call(metric, filteredDimension, filterValue);
-
+      source.on('filter', function(filteredDimension, filterValue) {
         // If this metric's dimension was filtered, then the metric won't change
         if (!dimension || filteredDimension !== dimension) {
-          dispatch.change.call(metric);
+          metric.trigger('change');
         }
       });
-
-      // Metric ids need only be unique among metric objects
-      metricId++;
 
       return metric;
     };
