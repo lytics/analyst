@@ -20,13 +20,17 @@ analyst.embed.js: \
 
 .INTERMEDIATE analyst.js: \
 	src/start.js \
-	src/analyst.js \
+	src/core.js \
+	src/util.js \
 	src/events.js \
+	src/source.js \
+	src/metric.js \
 	analyst.drivers.js \
 	src/export.js \
 	src/end.js
 
 analyst.drivers.js: \
+	src/drivers/preload.js \
 	src/drivers/lytics.js
 
 test: all
