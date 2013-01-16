@@ -1,8 +1,10 @@
-analyst.addDriver('lytics', {
-  fetch: function(callback) {
-    var self = this,
-      options = this.options,
-      baseUrl = options.url || '//api.lytics.io',
+analyst.addDriver('lytics', function(options) {
+  var source = this;
+
+  options = options || {};
+
+  return function(limit) {
+    var baseUrl = options.url || '//api.lytics.io',
       url = baseUrl + '/api/' + (options.clientId ? options.clientId + '/' : '') + options.query,
       data = options.data || {},
       params = [];
@@ -50,7 +52,7 @@ analyst.addDriver('lytics', {
         fields._ts = offset + measures.length;
         fields._date = fields._ts + 1;
 
-        self.fields = fields;
+        source.fieldMap(fields);
       }
 
       // Parse data
@@ -68,7 +70,7 @@ analyst.addDriver('lytics', {
         });
       }
 
-      callback(data);
+      source.add(data);
       delete root[cbName];
       script.remove();
     };
@@ -77,10 +79,5 @@ analyst.addDriver('lytics', {
     script.src = url;
     root[cbName] = handleResponse;
     document.body.appendChild(script);
-  },
-
-  indexFor: function(field) {
-    var fields = this.fields;
-    return fields && (field in fields) ? fields[field] : null;
-  }
+  };
 });

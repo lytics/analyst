@@ -41,14 +41,13 @@
     }
     var drivers = {};
     analyst.addDriver = function(name, driver) {
-      function Driver(options) {
-        this.options = options;
-      }
-      var constructor = driver.hasOwnProperty("constructor") ? driver.constructor : Driver;
-      constructor.prototype = driver;
-      drivers[name] = constructor;
+      drivers[name] = driver;
     };
-    analyst.source = function(type, options) {
+    analyst.source = function(type) {
+      function indexFor(field) {
+        var fields = source.fieldMap();
+        return fields && field in fields ? fields[field] : null;
+      }
       function getDimension(value) {
         if (!dimensions[value]) {
           var dimension = cf.dimension(valueFor(indexFor, value)), filter = dimension.filter;
@@ -66,7 +65,7 @@
       if (!drivers[type]) {
         throw new Error("Source type '" + type + "' unknown");
       }
-      var source = {}, filterStack = [], cf = crossfilter(), dimensions = {}, driver = new drivers[type](options), indexFor = driver.indexFor.bind(driver), dispatch = d3.dispatch("ready", "change", "filter"), metricId = 1, timeout;
+      var source = {}, filterStack = [], fieldMap = {}, cf = crossfilter(), dimensions = {}, driver = drivers[type].apply(source, slice(arguments, 1)), dispatch = d3.dispatch("ready", "change", "filter"), metricId = 1, timeout;
       source.on = function(event, listener) {
         dispatch.on(event, listener);
         return source;
@@ -75,20 +74,25 @@
         filterStack.push(valueFor(indexFor, filter));
         return source;
       };
-      source.fetch = function(callback) {
-        driver.fetch(function(data) {
-          var ready = !cf.size();
-          cf.add(filterStack.reduce(function(data, filter) {
-            return data.filter(filter);
-          }, data));
-          if (ready) {
-            dispatch.ready.call(source);
-          }
-          dispatch.change.call(source);
-          if (callback) {
-            callback.call(source);
-          }
-        });
+      source.add = function(data) {
+        var ready = !cf.size();
+        cf.add(filterStack.reduce(function(data, filter) {
+          return data.filter(filter);
+        }, data));
+        if (ready) {
+          dispatch.ready.call(source);
+        }
+        dispatch.change.call(source);
+      };
+      source.fieldMap = function(map) {
+        if (!arguments.length) {
+          return fieldMap;
+        }
+        fieldMap = map;
+        return source;
+      };
+      source.fetch = function() {
+        driver();
         return source;
       };
       source.start = function(interval) {
@@ -335,9 +339,11 @@
     var isObject = is("object");
     var isArray = Array.isArray;
   })();
-  analyst.addDriver("lytics", {
-    fetch: function(callback) {
-      var self = this, options = this.options, baseUrl = options.url || "//api.lytics.io", url = baseUrl + "/api/" + (options.clientId ? options.clientId + "/" : "") + options.query, data = options.data || {}, params = [];
+  analyst.addDriver("lytics", function(options) {
+    var source = this;
+    options = options || {};
+    return function(limit) {
+      var baseUrl = options.url || "//api.lytics.io", url = baseUrl + "/api/" + (options.clientId ? options.clientId + "/" : "") + options.query, data = options.data || {}, params = [];
       var script = document.createElement("script");
       var cbName = "analyst_lytics_" + (new Date).getTime();
       params.push("callback=" + cbName);
@@ -365,7 +371,7 @@
           });
           fields._ts = offset + measures.length;
           fields._date = fields._ts + 1;
-          self.fields = fields;
+          source.fieldMap(fields);
         }
         if (response.data) {
           response.data.forEach(function(segment) {
@@ -377,18 +383,14 @@
             });
           });
         }
-        callback(data);
+        source.add(data);
         delete root[cbName];
         script.remove();
       };
       script.src = url;
       root[cbName] = handleResponse;
       document.body.appendChild(script);
-    },
-    indexFor: function(field) {
-      var fields = this.fields;
-      return fields && field in fields ? fields[field] : null;
-    }
+    };
   });
   if (typeof exports !== "undefined") {
     exports.analyst = analyst;

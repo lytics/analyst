@@ -17,20 +17,11 @@ var analyst = {
 
   // Add a source adapter implementation
   analyst.addDriver = function(name, driver) {
-    var constructor = driver.hasOwnProperty('constructor') ? driver.constructor : Driver;
-
-    // Default driver constructor, just saves options
-    function Driver(options) {
-      this.options = options;
-    }
-
-    constructor.prototype = driver;
-
-    drivers[name] = constructor;
+    drivers[name] = driver;
   };
 
   // Object that represents a source of data that 'metrics' can be drawn from
-  analyst.source = function(type, options) {
+  analyst.source = function(type) {
     // Check that the driver is installed
     if (!drivers[type]) {
       throw new Error("Source type '" + type + "' unknown");
@@ -38,14 +29,18 @@ var analyst = {
 
     var source = {},
       filterStack = [],
+      fieldMap = {},
       cf = crossfilter(),
       dimensions = {},
-      // TODO: bind all functions in the driver instance to use the source as their context
-      driver = new drivers[type](options),
-      indexFor = driver.indexFor.bind(driver),
+      driver = drivers[type].apply(source, slice(arguments, 1)),
       dispatch = d3.dispatch('ready', 'change', 'filter'),
       metricId = 1,
       timeout;
+
+    function indexFor(field) {
+      var fields = source.fieldMap();
+      return fields && (field in fields) ? fields[field] : null;
+    }
 
     // Dimensions are expensive, so reuse them when possible
     function getDimension(value) {
@@ -84,27 +79,34 @@ var analyst = {
       return source;
     };
 
-    source.fetch = function(callback) {
-      driver.fetch(function(data) {
-        var ready = !cf.size();
+    source.add = function(data) {
+      var ready = !cf.size();
 
-        // Filter the data and add it to the crossfilter
-        cf.add(filterStack.reduce(function(data, filter) {
-          return data.filter(filter);
-        }, data));
+      // Filter the data and add it to the crossfilter
+      cf.add(filterStack.reduce(function(data, filter) {
+        return data.filter(filter);
+      }, data));
 
-        // Notify of initial data load
-        if (ready) {
-          dispatch.ready.call(source);
-        }
+      // Notify of initial data load
+      if (ready) {
+        dispatch.ready.call(source);
+      }
 
-        // Notify of changes to the underlying data
-        dispatch.change.call(source);
+      // Notify of changes to the underlying data
+      dispatch.change.call(source);
+    };
 
-        if (callback) {
-          callback.call(source);
-        }
-      });
+    source.fieldMap = function(map) {
+      if (!arguments.length) {
+        return fieldMap;
+      }
+
+      fieldMap = map;
+      return source;
+    };
+
+    source.fetch = function() {
+      driver();
 
       return source;
     };
