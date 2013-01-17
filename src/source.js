@@ -10,6 +10,7 @@ analyst.source = function(type) {
 
   var source = {},
     filterStack = [],
+    sanitizer,
     fieldMap = {},
     indexer,
     cf = crossfilter(),
@@ -26,12 +27,25 @@ analyst.source = function(type) {
 
   // Add raw data to the crossfilter
   source.add = function(data) {
-    var ready = !cf.size();
+    if (!isArray(data)) {
+      throw new Error('Input data must be an array');
+    }
 
-    // Filter the data and add it to the crossfilter
-    cf.add(filterStack.reduce(function(data, filter) {
-      return data.filter(filter);
-    }, data));
+    var ready = !cf.size(),
+      clean;
+
+    // Apply the sanitizer function before adding the data
+    if (sanitizer) {
+      data = data.reduce(function(cleansed, d) {
+        if (clean = sanitizer(d, indexer || defaultIndexer)) {
+          cleansed.push(clean);
+        }
+        return cleansed;
+      }, []);
+    }
+
+    // Add the data to the crossfilter
+    cf.add(data);
 
     // Notify of initial data load
     if (ready) {
@@ -44,8 +58,17 @@ analyst.source = function(type) {
     return source;
   };
 
-  source.filter = function(filter) {
-    filterStack.push(valueFor(source.indexer(), filter));
+  // Get or set a function that sanitizes/rejects data as it's added to the source
+  source.sanitizer = function(s) {
+    if (!arguments.length) {
+      return filter;
+    }
+
+    if (!isFunction(s)) {
+      throw new Error('Sanitizer must be a function');
+    }
+
+    sanitizer = s;
     return source;
   };
 

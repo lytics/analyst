@@ -127,21 +127,36 @@
     if (!drivers[type]) {
       throw new Error("Source type '" + type + "' unknown");
     }
-    var source = {}, filterStack = [], fieldMap = {}, indexer, cf = crossfilter(), dimensions = {}, fetch, timeout;
+    var source = {}, filterStack = [], sanitizer, fieldMap = {}, indexer, cf = crossfilter(), dimensions = {}, fetch, timeout;
     addEventHandling(source);
     source.add = function(data) {
-      var ready = !cf.size();
-      cf.add(filterStack.reduce(function(data, filter) {
-        return data.filter(filter);
-      }, data));
+      if (!isArray(data)) {
+        throw new Error("Input data must be an array");
+      }
+      var ready = !cf.size(), clean;
+      if (sanitizer) {
+        data = data.reduce(function(cleansed, d) {
+          if (clean = sanitizer(d, indexer || defaultIndexer)) {
+            cleansed.push(clean);
+          }
+          return cleansed;
+        }, []);
+      }
+      cf.add(data);
       if (ready) {
         source.trigger("ready");
       }
       source.trigger("change");
       return source;
     };
-    source.filter = function(filter) {
-      filterStack.push(valueFor(source.indexer(), filter));
+    source.sanitizer = function(s) {
+      if (!arguments.length) {
+        return filter;
+      }
+      if (!isFunction(s)) {
+        throw new Error("Sanitizer must be a function");
+      }
+      sanitizer = s;
       return source;
     };
     source.fieldMap = function(fm) {
