@@ -12,15 +12,10 @@ analyst.source = function(type) {
     filterStack = [],
     sanitizer,
     fieldMap = {},
-    indexer,
     cf = crossfilter(),
     dimensions = {},
     fetch,
     timeout;
-
-  function defaultIndexer(field) {
-    return field in fieldMap ? fieldMap[field] : null;
-  }
 
   // Add `on`, `off`, and `trigger` methods for handling events
   addEventHandling(source);
@@ -37,7 +32,7 @@ analyst.source = function(type) {
     // Apply the sanitizer function before adding the data
     if (sanitizer) {
       data = data.reduce(function(cleansed, d) {
-        if (clean = sanitizer(d, indexer || defaultIndexer)) {
+        if (clean = sanitizer(d, indexFor)) {
           cleansed.push(clean);
         }
         return cleansed;
@@ -59,46 +54,37 @@ analyst.source = function(type) {
   };
 
   // Get or set a function that sanitizes/rejects data as it's added to the source
-  source.sanitizer = function(s) {
+  source.sanitizer = function(func) {
     if (!arguments.length) {
-      return filter;
+      return sanitizer;
     }
 
-    if (!isFunction(s)) {
+    if (!isFunction(func)) {
       throw new Error('Sanitizer must be a function');
     }
 
-    sanitizer = s;
+    sanitizer = func;
     return source;
   };
 
   // Get or set an object that maps field names to their indicies in the
   // raw row data
-  source.fieldMap = function(fm) {
+  source.fieldMap = function(map) {
     if (!arguments.length) {
       return fieldMap;
     }
 
-    if (!isObject(fm)) {
+    if (!isObject(map)) {
       throw new Error('Field map must be a plain object');
     }
 
-    fieldMap = fm;
+    fieldMap = map;
     return source;
   };
 
-  // Get or set the indexing function that turns a field name into a row index
-  source.indexer = function(i) {
-    if (!arguments.length) {
-      return indexer || defaultIndexer;
-    }
-
-    if (!isFunction(i)) {
-      throw new Error('Indexer must be a function');
-    }
-
-    indexer = i;
-    return source;
+  // Gets the index for a field given the current field mapping
+  source.indexFor = function(field) {
+    return field in fieldMap ? fieldMap[field] : null;
   };
 
   // Fetch data asynchronously
@@ -149,7 +135,7 @@ analyst.source = function(type) {
     if (!dimensions[value]) {
       // Create an indexing function if a field name was given (if it's already a
       // value function it will pass straight through)
-      var dimension = cf.dimension(valueFor(source.indexer(), value)),
+      var dimension = cf.dimension(makeIndexer(value, source.indexFor)),
         filter = dimension.filter;
 
       // Wrap the filter method so that other metrics can be notified of

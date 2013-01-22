@@ -7,46 +7,49 @@ analyst.metric = function(source) {
   var metric = {},
     dimension,
     group,
-    outputFields = {},
-    reduceStack = [],
+    aliases = {},
+    reducers = {},
     transformStack = [ applyAliases ],
-    dateValue = valueFor(source.indexer(), '_date'),
-    applyAdd = applyReduce('add'),
-    applyRemove = applyReduce('remove'),
-    applyInitial = applyReduce('initial');
+    dateValue = makeIndexer('_date', source.indexFor);
 
   // Create a new output object that contains only the fields specified
   // by the reduce functions applied
   function applyAliases(output) {
-    var fields = keys(outputFields);
+    var fields = keys(aliases);
     return fields.length ? fields.reduce(function(data, field) {
-      data[outputFields[field]] = output[field];
+      data[aliases[field]] = output[field];
       return data;
     }, {}) : output;
   }
 
   // Apply all post-reduce transform functions
   function applyTransforms(initial) {
-    var fields = keys(outputFields),
+    var isAnonymous = '_' in reducers,
+      outputFields = keys(reducers),
+      // If there's only one anonymous reducer, assume transform functions
+      // operate on its value, and not the full output object
       output = transformStack.reduce(function(v, transform) {
         return transform(v);
-      }, initial);
+      }, isAnonymous ? initial._ : initial);
 
-    // Default behavior is to return the raw value if a single reduce
+    // Default behavior is to return the raw value if a single built-in reduce
     // function was appied, otherwise return the full output object
-    return fields.length === 1 ? output[fields[0]] : output;
+    return !isAnonymous && outputFields.length === 1 ? output[outputFields[0]] : output;
   }
 
   // Returns a function that applies all reduce functions of the given
   // type (add, remove, initial)
-  function applyReduce(type) {
+  function applyReducer(type) {
     return function(result, d) {
+      result = result || {};
+
       // Apply the set of reduce functions by modifying its value in the
       // result object (as specified by its particular field)
-      return reduceStack.reduce(function(data, reduction) {
-        data[reduction.field] = reduction[type](data[reduction.field], d);
-        return data;
-      }, result || {});
+      keys(reducers).forEach(function(field) {
+        result[field] = reducers[field][type](result[field], d);
+      });
+
+      return result;
     };
   }
 
@@ -101,16 +104,20 @@ analyst.metric = function(source) {
 
   // Apply a set of reduction functions for adding and removing data
   metric.reduce = function(reduceAdd, reduceRemove, initialValue, outputField) {
-    outputField = outputField || 'output';
+    if ('_' in reducers) {
+      throw new Error('All reducing functions must be aliased');
+    }
+
+    // If the reducer doesn't have an alias, it is 'anonymous' and gets a special key
+    outputField = outputField || '_';
 
     // Don't add reduction if it's duplicating an existing one
-    if (!(outputField in applyInitial())) {
-      reduceStack.push({
+    if (!(outputField in reducers)) {
+      reducers[outputField] = {
         add: reduceAdd,
         remove: reduceRemove,
-        initial: initialValue,
-        field: outputField
-      });
+        initial: initialValue
+      };
     }
 
     return metric;
@@ -118,7 +125,7 @@ analyst.metric = function(source) {
 
   // Returns a function that uses the given function and output field suffix
   // to add reduce functions
-  function addReduce(reduce, suffix) {
+  function makeReducer(reduce, suffix) {
     // The second argument is optionally an alias to give the value in the
     // result object, and the rest of the arguments are treated as transforms
     return function(field) {
@@ -127,7 +134,7 @@ analyst.metric = function(source) {
         alias = isFunction(transforms[0]) ? outputField : transforms.shift() || outputField;
 
       // Keep track of the output field for aliasing later
-      outputFields[outputField] = alias;
+      aliases[outputField] = alias;
 
       // Wrap transform functions such that they apply to the correct
       // aliased field, before flattening
@@ -143,46 +150,28 @@ analyst.metric = function(source) {
   }
 
   // Count all rows
-  metric.count = addReduce(countReduce);
+  metric.count = makeReducer(countReduce);
 
   function countReduce() {
-    return metric.reduce(
-      function (count) {
-        return count + 1;
-      },
-      function (count) {
-        return count - 1;
-      },
-      zero,
-      'count'
-    );
+    return metric.reduce(incrementer, decrementer, literalZero, 'count');
   }
 
   // Sum the given field
-  metric.sum = addReduce(sumReduce, 'total');
+  metric.sum = makeReducer(sumReduce, 'total');
 
   function sumReduce(field, outputField) {
-    var value = valueFor(source.indexer(), field);
+    var value = makeIndexer(field, source.indexFor);
 
-    return metric.reduce(
-      function(sum, d) {
-        return sum + value(d);
-      },
-      function(sum, d) {
-        return sum - value(d);
-      },
-      zero,
-      outputField
-    );
+    return metric.reduce(makeAdder(value), makeAdder(makeInverter(value)), literalZero, outputField);
   }
 
-  // average the given field
-  metric.average = addReduce(averageReduce, 'average');
+  // Average the given field
+  metric.average = makeReducer(averageReduce, 'average');
 
   function averageReduce(field, outputField) {
     var totalField = fieldName(field, 'total');
 
-    if (!(outputField in applyInitial())) {
+    if (!(outputField in reducers)) {
       countReduce();
       sumReduce(field, totalField);
 
@@ -198,10 +187,10 @@ analyst.metric = function(source) {
   }
 
   // Find distinct values for the field
-  metric.distinct = addReduce(distinctReduce, 'distincts');
+  metric.distinct = makeReducer(distinctReduce, 'distincts');
 
   function distinctReduce(field, outputField) {
-    var value = valueFor(source.indexer(), field);
+    var value = makeIndexer(field, source.indexFor);
 
     return metric.reduce(
       function(distinct, d) {
@@ -223,19 +212,19 @@ analyst.metric = function(source) {
         }
         return distinct;
       },
-      object,
+      literalObject,
       outputField
     );
   }
 
   // Find count of distinct values for the field
-  metric.distinctCount = addReduce(distinctCountReduce, 'distinct_total');
+  metric.distinctCount = makeReducer(distinctCountReduce, 'distinct_total');
 
   function distinctCountReduce(field, outputField) {
-    var value = valueFor(source.indexer(), field),
+    var value = makeIndexer(field, source.indexFor),
       distinctsField = fieldName(field, 'distincts');
 
-    if (!(outputField in applyInitial())) {
+    if (!(outputField in reducers)) {
       distinctReduce(field, distinctsField);
 
       // The count of distincts relies on actually calculating the distincts,
@@ -268,8 +257,8 @@ analyst.metric = function(source) {
     if (!group) {
       group = dimension ? dimension.group() : source.crossfilter().groupAll();
 
-      if (reduceStack.length) {
-        group.reduce(applyAdd, applyRemove, applyInitial);
+      if (keys(reducers).length) {
+        group.reduce(applyReducer('add'), applyReducer('remove'), applyReducer('initial'));
       }
 
       // Create a wrapper around the group that applies all transforms
@@ -306,12 +295,12 @@ analyst.metric = function(source) {
       return null;
     }
 
-    return metric.group().all().map(valueAt('key'));
+    return metric.group().all().map(makeIndexer('key'));
   };
 
   // Extract a single value from the result, or each result
   metric.extract = function(field) {
-    transformStack.push(valueAt(field));
+    transformStack.push(makeIndexer(field));
     return metric;
   };
 

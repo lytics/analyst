@@ -32,16 +32,6 @@ var isObject = is('object');
 // Checks if the object is an array
 var isArray = Array.isArray;
 
-// Function that just returns zero
-function zero() {
-  return 0;
-}
-
-// Function that returns a new object
-function object() {
-  return {};
-}
-
 // Returns a name combining the field and modifier uniquely
 function fieldName(field, modifier) {
   return (field ? field + '.' : '') + modifier;
@@ -49,24 +39,59 @@ function fieldName(field, modifier) {
 
 // Returns a function that returns the value of the first arg at the index given
 // by the specified field and field mapping
-function valueFor(indexer, field) {
+function makeIndexer(field, indexFor) {
   if (isFunction(field)) {
     // Add the field mapping function as a parameter so that fields can be
     // accessed by name
-    return function(d) {
-      return field(d, indexer);
-    };
+    return indexFor ? function(d) {
+      return field(d, indexFor);
+    } : field;
   }
 
-  return function(d) {
-    var index = indexer(field);
-    return index !== null ? d[index] : null;
+  // If there's a field mapping, use it to find the index, otherwise simply index the value
+  if (indexFor) {
+    return function(d) {
+      var index = indexFor(field);
+      return index !== null ? d[index] : null;
+    };
+  } else {
+    return function(d) {
+      return d[field];
+    };
+  }
+}
+
+// Return a 'value' function that ignores the value and always returns a literal value
+function makeLiteral(value) {
+  return function() {
+    return value;
   };
 }
 
-// Returns a function that returns the value of the first arg at the given index
-function valueAt(index) {
+// Creates a value function that returns the negated value of the given value function
+function makeInverter(value) {
   return function(d) {
-    return d[index];
+    return -value(d);
   };
 }
+
+// Creates a reduce function that adds a given value to the memo
+function makeAdder(value) {
+  return function(sum, d) {
+    return sum + value(d);
+  };
+}
+
+// Function that returns a new object
+function literalObject() {
+  return {};
+}
+
+// Function that just returns zero
+function literalZero() {
+  return 0;
+}
+
+// Reduce funcitons for incrementing and decrementing, regardless of value
+var incrementer = makeAdder(makeLiteral(1));
+var decrementer = makeAdder(makeLiteral(-1));
