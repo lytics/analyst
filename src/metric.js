@@ -10,7 +10,7 @@ analyst.metric = function(source) {
     aliases = [],
     reducers = {},
     transformStack = [ clone ],
-    dateValue = makeIndexer('_date', source.indexFor);
+    dateValue = makeIndexer('_date', source);
 
   // Apply all post-reduce transform functions
   function applyTransforms(initial) {
@@ -46,7 +46,7 @@ analyst.metric = function(source) {
       // Apply the set of reduce functions by modifying its value in the
       // result object (as specified by its particular field)
       keys(reducers).forEach(function(field) {
-        result[field] = reducers[field][type](result[field], d);
+        result[field] = reducers[field][type].call(source, result[field], d);
       });
 
       return result;
@@ -184,7 +184,7 @@ analyst.metric = function(source) {
 
   function addSumReducer(field) {
     var intermediate = fieldName(field, 'total'),
-      value = makeIndexer(field, source.indexFor);
+      value = makeIndexer(field, source);
 
     reducers[intermediate] = {
       add: makeAdder(value),
@@ -218,7 +218,7 @@ analyst.metric = function(source) {
 
   function addDistinctReducer(field) {
     var intermediate = fieldName(field, 'distincts'),
-      value = makeIndexer(field, source.indexFor);
+      value = makeIndexer(field, source);
 
     reducers[intermediate] = {
       add: function(distinct, d) {

@@ -61,37 +61,36 @@ function fieldName(field, modifier) {
 
 // Returns a function that returns the value of the first arg at the index given
 // by the specified field and field mapping
-function makeIndexer(field, indexFor) {
-  if (isFunction(field)) {
-    // Add the field mapping function as a parameter so that fields can be
-    // accessed by name
-    return indexFor ? function(d) {
-      return field(d, indexFor);
-    } : field;
+function makeIndexer(field, context) {
+  // If no context is specified, return a simple accessor function
+  if (!context) {
+    return function(d) {
+      return d[field] || null;
+    };
   }
 
-  // Use the field mapping if possible
-  if (isString(field) && indexFor) {
-    // Handle jsonpointer strings
-    if (field[0] === '/') {
-      var match = field.match(/\/(\w+)(.*)/),
-        pointer = match[2] || '/';
-      field = match[1];
-      return function(d) {
-        var obj = d[indexFor(field)] || null;
-        return isObject(obj) ? analyst.jsonpointer.get(obj, pointer) : obj;
-      };
-    } else {
-      return function(d) {
-        return d[indexFor(field)] || null;
-      };
-    }
-  }
-
-  // Fallback is a simple indexing of the value, be it a plain object or array
-  return function(d) {
-    return d[field] || null;
+  // Indexer that looks up the field's index if possible
+  var indexer = function(d) {
+    return d[this.indexFor ? this.indexFor(field) : field] || null;
   };
+
+  // Always invoke the indexer with the given context
+  indexer = indexer.bind(context);
+
+  // Handle jsonpointer strings
+  if (isString(field) && field[0] === '/') {
+    var match = field.match(/\/(\w+)(.*)/),
+      pointer = match[2] || '/';
+
+    field = match[1];
+
+    return function(d) {
+      var obj = indexer(d);
+      return isObject(obj) ? analyst.jsonpointer.get(obj, pointer) : obj;
+    };
+  }
+
+  return indexer;
 }
 
 // Return a 'value' function that ignores the value and always returns a literal value

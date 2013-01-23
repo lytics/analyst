@@ -32,7 +32,7 @@ analyst.source = function(type) {
     // Apply the sanitizer function before adding the data
     if (sanitizer) {
       data = data.reduce(function(cleansed, d) {
-        if (clean = sanitizer(d, indexFor)) {
+        if (clean = sanitizer.call(source, d)) {
           cleansed.push(clean);
         }
         return cleansed;
@@ -133,9 +133,9 @@ analyst.source = function(type) {
   source.dimension = function(value) {
     // Dimensions are expensive, so reuse them when possible
     if (!dimensions[value]) {
-      // Create an indexing function if a field name was given (if it's already a
-      // value function it will pass straight through)
-      var dimension = cf.dimension(makeIndexer(value, source.indexFor)),
+      // Create an indexing function if a field name was given
+      var valueFunc = isFunction(value) ? value.bind(source) : makeIndexer(value, source),
+        dimension = cf.dimension(valueFunc),
         filter = dimension.filter;
 
       // Wrap the filter method so that other metrics can be notified of
