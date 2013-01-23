@@ -70,17 +70,28 @@ function makeIndexer(field, indexFor) {
     } : field;
   }
 
-  // If there's a field mapping, use it to find the index, otherwise simply index the value
-  if (indexFor) {
-    return function(d) {
-      var index = indexFor(field);
-      return index !== null ? d[index] : null;
-    };
-  } else {
-    return function(d) {
-      return d[field];
-    };
+  // Use the field mapping if possible
+  if (isString(field) && indexFor) {
+    // Handle jsonpointer strings
+    if (field[0] === '/') {
+      var match = field.match(/\/(\w+)(.*)/),
+        pointer = match[2] || '/';
+      field = match[1];
+      return function(d) {
+        var obj = d[indexFor(field)] || null;
+        return isObject(obj) ? analyst.jsonpointer.get(obj, pointer) : obj;
+      };
+    } else {
+      return function(d) {
+        return d[indexFor(field)] || null;
+      };
+    }
   }
+
+  // Fallback is a simple indexing of the value, be it a plain object or array
+  return function(d) {
+    return d[field] || null;
+  };
 }
 
 // Return a 'value' function that ignores the value and always returns a literal value
@@ -100,7 +111,7 @@ function makeInverter(value) {
 // Creates a reduce function that adds a given value to the memo
 function makeAdder(value) {
   return function(sum, d) {
-    return sum + value(d);
+    return sum + (+value(d));
   };
 }
 

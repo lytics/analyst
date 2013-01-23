@@ -23,6 +23,7 @@ analyst.embed.js: \
 	src/core.js \
 	src/util.js \
 	src/events.js \
+	src/jsonpointer.js \
 	src/source.js \
 	src/metric.js \
 	analyst.drivers.js \
