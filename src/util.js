@@ -7,6 +7,28 @@ var slice = Function.prototype.call.bind(Array.prototype.slice);
 // Returns an array of an object's keys
 var keys = Object.keys;
 
+// Returns a boolean indicating whether the value is in the given array
+function inArray(arr, value) {
+  return arr.indexOf(value) !== -1;
+}
+
+// Simple extend implementation
+function extend(target, obj) {
+  if (!isObject(obj)) {
+    return obj;
+  }
+
+  keys(obj).forEach(function(attr) {
+    target[attr] = obj[attr];
+  });
+  return target;
+}
+
+// Shallow clone using extend
+function clone(obj) {
+  return extend({}, obj);
+}
+
 // Capitalizes the first letter of the given string
 function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -95,3 +117,37 @@ function literalZero() {
 // Reduce funcitons for incrementing and decrementing, regardless of value
 var incrementer = makeAdder(makeLiteral(1));
 var decrementer = makeAdder(makeLiteral(-1));
+
+// function makeIndexingAdder(value) {
+//   return function(memo, d) {
+//     var values = value(d);
+//
+//     keys(values).forEach(function(key) {
+//       if (!(key in memo)) {
+//         memo[key] = 0;
+//       }
+//
+//       memo[key] += values[key];
+//     });
+//
+//     return memo;
+//   };
+// }
+//
+// function makeIndexingSubtracter(value) {
+//   return function(memo, d) {
+//     var values = value(d);
+//
+//     keys(values).forEach(function(key) {
+//       if (key in memo) {
+//         memo[key] -= values[key];
+//
+//         if (!memo[key]) {
+//           delete memo[key];
+//         }
+//       }
+//     });
+//
+//     return memo;
+//   },
+// }

@@ -7,34 +7,34 @@ analyst.metric = function(source) {
   var metric = {},
     dimension,
     group,
-    aliases = {},
+    aliases = [],
     reducers = {},
-    transformStack = [ applyAliases ],
+    transformStack = [ clone ],
     dateValue = makeIndexer('_date', source.indexFor);
-
-  // Create a new output object that contains only the fields specified
-  // by the reduce functions applied
-  function applyAliases(output) {
-    var fields = keys(aliases);
-    return fields.length ? fields.reduce(function(data, field) {
-      data[aliases[field]] = output[field];
-      return data;
-    }, {}) : output;
-  }
 
   // Apply all post-reduce transform functions
   function applyTransforms(initial) {
-    var isAnonymous = '_' in reducers,
-      outputFields = keys(reducers),
-      // If there's only one anonymous reducer, assume transform functions
-      // operate on its value, and not the full output object
-      output = transformStack.reduce(function(v, transform) {
-        return transform(v);
-      }, isAnonymous ? initial._ : initial);
+    var transforms = slice(transformStack);
 
     // Default behavior is to return the raw value if a single built-in reduce
     // function was appied, otherwise return the full output object
-    return !isAnonymous && outputFields.length === 1 ? output[outputFields[0]] : output;
+    if (inArray(aliases, '_')) {
+      transforms.push(makeIndexer('_'));
+    } else {
+      // Create a new output object with no intermediate fields
+      transforms.push(function(output) {
+        return aliases.reduce(function(result, alias) {
+          result[alias] = output[alias];
+          return result;
+        }, {});
+      });
+    }
+
+    // If there's only one anonymous reducer, assume transform functions
+    // operate on its value, and not the full output object
+    return transforms.reduce(function(result, transform) {
+      return transform(result);
+    }, initial);
   }
 
   // Returns a function that applies all reduce functions of the given
@@ -50,6 +50,53 @@ analyst.metric = function(source) {
       });
 
       return result;
+    };
+  }
+
+  // Give intermediate values their aliased name
+  function applyAlias(intermediate, alias) {
+    return function(output) {
+      output[alias] = output[intermediate];
+      return output;
+    };
+  }
+
+  // Make a reducer function that handles field aliasing and transforms with the
+  // given function for adding reducer logic
+  function makeReducer(addReducer) {
+    return function() {
+      var args = arguments,
+        // This is the number of beginning arguments the particular reducer needs
+        numArgs = addReducer.length,
+        // Transforms are specified last
+        transforms = slice(args, numArgs),
+        // If the reducer doesn't have an alias, it is 'anonymous' and gets a special key
+        alias = isString(transforms[0]) ? transforms.shift() : '_',
+        intermediate;
+
+      if (inArray(aliases, '_')) {
+        throw new Error('All reducing functions must be aliased');
+      }
+
+      if (inArray(aliases, alias)) {
+        throw new Error("Reduce function alias already exists: '" + alias + "'");
+      }
+
+      // Keep track of all of the valid aliases
+      aliases.push(alias);
+
+      // Call the function that adds the reducer logic with the first N args
+      intermediate = addReducer.apply(metric, slice(args, 0, numArgs));
+
+      // Add transform for aliasing the output value
+      transformStack.push(applyAlias(intermediate, alias));
+
+      // Add transforms
+      if (transforms.length) {
+        metric.transform(alias, transforms);
+      }
+
+      return metric;
     };
   }
 
@@ -103,97 +150,78 @@ analyst.metric = function(source) {
   };
 
   // Apply a set of reduction functions for adding and removing data
-  metric.reduce = function(reduceAdd, reduceRemove, initialValue, outputField) {
-    if ('_' in reducers) {
-      throw new Error('All reducing functions must be aliased');
-    }
+  metric.reduce = makeReducer(addReducer);
 
-    // If the reducer doesn't have an alias, it is 'anonymous' and gets a special key
-    outputField = outputField || '_';
+  function addReducer(reduceAdd, reduceRemove, initialValue) {
+    var intermediate = aliases.length;
 
-    // Don't add reduction if it's duplicating an existing one
-    if (!(outputField in reducers)) {
-      reducers[outputField] = {
-        add: reduceAdd,
-        remove: reduceRemove,
-        initial: initialValue
-      };
-    }
-
-    return metric;
-  };
-
-  // Returns a function that uses the given function and output field suffix
-  // to add reduce functions
-  function makeReducer(reduce, suffix) {
-    // The second argument is optionally an alias to give the value in the
-    // result object, and the rest of the arguments are treated as transforms
-    return function(field) {
-      var transforms = slice(arguments, 1),
-        outputField = fieldName(field, suffix),
-        alias = isFunction(transforms[0]) ? outputField : transforms.shift() || outputField;
-
-      // Keep track of the output field for aliasing later
-      aliases[outputField] = alias;
-
-      // Wrap transform functions such that they apply to the correct
-      // aliased field, before flattening
-      transforms.forEach(function(transform) {
-        transformStack.push(function(d) {
-          d[alias] = transform(d[alias]);
-          return d;
-        });
-      });
-
-      return reduce(field, outputField);
+    reducers[intermediate] = {
+      add: reduceAdd,
+      remove: reduceRemove,
+      initial: initialValue
     };
+
+    return intermediate;
   }
 
   // Count all rows
-  metric.count = makeReducer(countReduce);
+  metric.count = makeReducer(addCountReducer);
 
-  function countReduce() {
-    return metric.reduce(incrementer, decrementer, literalZero, 'count');
+  function addCountReducer() {
+    var intermediate = 'count';
+
+    reducers[intermediate] = {
+      add: incrementer,
+      remove: decrementer,
+      initial: literalZero
+    };
+
+    return intermediate;
   }
 
   // Sum the given field
-  metric.sum = makeReducer(sumReduce, 'total');
+  metric.sum = makeReducer(addSumReducer);
 
-  function sumReduce(field, outputField) {
-    var value = makeIndexer(field, source.indexFor);
+  function addSumReducer(field) {
+    var intermediate = fieldName(field, 'total'),
+      value = makeIndexer(field, source.indexFor);
 
-    return metric.reduce(makeAdder(value), makeAdder(makeInverter(value)), literalZero, outputField);
+    reducers[intermediate] = {
+      add: makeAdder(value),
+      remove: makeAdder(makeInverter(value)),
+      initial: literalZero
+    };
+
+    return intermediate;
   }
 
   // Average the given field
-  metric.average = makeReducer(averageReduce, 'average');
+  metric.average = makeReducer(addAverageReducer);
 
-  function averageReduce(field, outputField) {
-    var totalField = fieldName(field, 'total');
+  function addAverageReducer(field) {
+    var intermediate = fieldName(field, 'average'),
+      countField = addCountReducer(),
+      totalField = addSumReducer(field);
 
-    if (!(outputField in reducers)) {
-      countReduce();
-      sumReduce(field, totalField);
+    // Perform the average at the end, since it can be computed from
+    // intermediate calculations (but before aliases are applied)
+    transformStack.push(function(output) {
+      output[intermediate] = output[countField] ? output[totalField] / output[countField] : 0;
+      return output;
+    });
 
-      // Perform the average at the end, since it can be computed from
-      // intermediate calculations (but before aliases are applied)
-      transformStack.unshift(function(d) {
-        d[outputField] = d.count? d[totalField] / d.count : 0;
-        return d;
-      });
-    }
-
-    return metric;
+    return intermediate;
   }
 
   // Find distinct values for the field
-  metric.distinct = makeReducer(distinctReduce, 'distincts');
+  metric.distinct = makeReducer(addDistinctReducer);
 
-  function distinctReduce(field, outputField) {
-    var value = makeIndexer(field, source.indexFor);
+  function addDistinctReducer(field) {
+    var intermediate = fieldName(field, 'distincts'),
+      value = makeIndexer(field, source.indexFor);
 
-    return metric.reduce(
-      function(distinct, d) {
+    reducers[intermediate] = {
+      add: function(distinct, d) {
         var v = value(d);
         if (v in distinct) {
           distinct[v]++;
@@ -202,7 +230,7 @@ analyst.metric = function(source) {
         }
         return distinct;
       },
-      function(distinct, d) {
+      remove: function(distinct, d) {
         var v = value(d);
         if (v in distinct) {
           distinct[v]--;
@@ -212,30 +240,27 @@ analyst.metric = function(source) {
         }
         return distinct;
       },
-      literalObject,
-      outputField
-    );
+      initial: literalObject
+    };
+
+    return intermediate;
   }
 
   // Find count of distinct values for the field
-  metric.distinctCount = makeReducer(distinctCountReduce, 'distinct_total');
+  metric.distinctCount = makeReducer(addDistinctCountReducer);
 
-  function distinctCountReduce(field, outputField) {
-    var value = makeIndexer(field, source.indexFor),
-      distinctsField = fieldName(field, 'distincts');
+  function addDistinctCountReducer(field) {
+    var intermediate = fieldName(field, 'distinct_count'),
+      distinctsField = addDistinctReducer(field);
 
-    if (!(outputField in reducers)) {
-      distinctReduce(field, distinctsField);
+    // The count of distincts relies on actually calculating the distincts,
+    // which can be done afterwards (but before aliases are applied)
+    transformStack.push(function(output) {
+      output[intermediate] = keys(output[distinctsField]).length;
+      return output;
+    });
 
-      // The count of distincts relies on actually calculating the distincts,
-      // which can be done afterwards (but before aliases are applied)
-      transformStack.unshift(function(d) {
-        d[outputField] = keys(d[distinctsField]).length;
-        return d;
-      });
-    }
-
-    return metric;
+    return intermediate;
   }
 
   // Get the underlying crossfilter dimension
@@ -257,7 +282,7 @@ analyst.metric = function(source) {
     if (!group) {
       group = dimension ? dimension.group() : source.crossfilter().groupAll();
 
-      if (keys(reducers).length) {
+      if (aliases.length) {
         group.reduce(applyReducer('add'), applyReducer('remove'), applyReducer('initial'));
       }
 
@@ -299,15 +324,41 @@ analyst.metric = function(source) {
   };
 
   // Extract a single value from the result, or each result
-  metric.extract = function(field) {
-    transformStack.push(makeIndexer(field));
-    return metric;
+  metric.extract = function(alias, field) {
+    var value = makeIndexer(field || alias);
+
+    return field ? metric.transform(alias, value) : metric.transform(value);
   };
 
-  // Add a transform function to the stack
-  metric.transform = function(transform) {
+  // Add a transform function to the stack that operates on the given output field
+  metric.transform = function(alias) {
     var transforms = slice(arguments);
-    transformStack = transformStack.concat(transforms);
+
+    if (isString(alias)) {
+      if (!inArray(aliases, alias)) {
+        throw new Error('The specified reduce funciton alias has not been defined');
+      }
+      // Remove the field name from the transforms array
+      transforms.shift();
+    } else {
+      if (!inArray(aliases, '_')) {
+        throw new Error('An alias must be supplied for the transform to be applied to');
+      }
+      // If no alias was specified, use the anonymous alias
+      alias = '_';
+    }
+
+    // Allow transforms to be specified as a single array argument
+    transforms = isArray(transforms[0]) ? transforms[0] : transforms;
+
+    // Wrap transform functions such that they apply to the given field
+    transforms.forEach(function(transform) {
+      transformStack.push(function(output) {
+        output[alias] = transform(output[alias]);
+        return output;
+      });
+    });
+
     return metric;
   };
 
