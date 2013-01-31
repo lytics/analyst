@@ -170,11 +170,7 @@ analyst.metric = function(source) {
   function addCountReducer() {
     var intermediate = 'count';
 
-    reducers[intermediate] = {
-      add: incrementer,
-      remove: decrementer,
-      initial: literalZero
-    };
+    reducers[intermediate] = makeCountReducer();
 
     return intermediate;
   }
@@ -186,11 +182,7 @@ analyst.metric = function(source) {
     var intermediate = fieldName(field, 'total'),
       value = makeIndexer(field, source);
 
-    reducers[intermediate] = {
-      add: makeAdder(value),
-      remove: makeAdder(makeInverter(value)),
-      initial: literalZero
-    };
+    reducers[intermediate] = makeSumReducer(value);
 
     return intermediate;
   }
@@ -220,28 +212,7 @@ analyst.metric = function(source) {
     var intermediate = fieldName(field, 'distincts'),
       value = makeIndexer(field, source);
 
-    reducers[intermediate] = {
-      add: function(distinct, d) {
-        var v = value(d);
-        if (v in distinct) {
-          distinct[v]++;
-        } else {
-          distinct[v] = 1;
-        }
-        return distinct;
-      },
-      remove: function(distinct, d) {
-        var v = value(d);
-        if (v in distinct) {
-          distinct[v]--;
-          if (!distinct[v]) {
-            delete distinct[v];
-          }
-        }
-        return distinct;
-      },
-      initial: literalObject
-    };
+    reducers[intermediate] = makeDistinctReducer(value);
 
     return intermediate;
   }
@@ -259,6 +230,17 @@ analyst.metric = function(source) {
       output[intermediate] = keys(output[distinctsField]).length;
       return output;
     });
+
+    return intermediate;
+  }
+
+  metric.sumObject = makeReducer(addSumObjectReducer);
+
+  function addSumObjectReducer(field) {
+    var intermediate = fieldName(field, 'sum_object'),
+      value = makeIndexer(field, source);
+
+    reducers[intermediate] = makeObjectReducer(value, makeSumReducer());
 
     return intermediate;
   }

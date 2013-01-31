@@ -103,14 +103,14 @@ function makeLiteral(value) {
 // Creates a value function that returns the negated value of the given value function
 function makeInverter(value) {
   return function(d) {
-    return -value(d);
+    return -(value ? value(d) : d);
   };
 }
 
 // Creates a reduce function that adds a given value to the memo
 function makeAdder(value) {
   return function(sum, d) {
-    return sum + (+value(d));
+    return sum + (+(value ? value(d) : d));
   };
 }
 
@@ -128,36 +128,83 @@ function literalZero() {
 var incrementer = makeAdder(makeLiteral(1));
 var decrementer = makeAdder(makeLiteral(-1));
 
-// function makeIndexingAdder(value) {
-//   return function(memo, d) {
-//     var values = value(d);
-//
-//     keys(values).forEach(function(key) {
-//       if (!(key in memo)) {
-//         memo[key] = 0;
-//       }
-//
-//       memo[key] += values[key];
-//     });
-//
-//     return memo;
-//   };
-// }
-//
-// function makeIndexingSubtracter(value) {
-//   return function(memo, d) {
-//     var values = value(d);
-//
-//     keys(values).forEach(function(key) {
-//       if (key in memo) {
-//         memo[key] -= values[key];
-//
-//         if (!memo[key]) {
-//           delete memo[key];
-//         }
-//       }
-//     });
-//
-//     return memo;
-//   },
-// }
+function makeCountReducer() {
+  return {
+    add: incrementer,
+    remove: decrementer,
+    initial: literalZero
+  };
+}
+
+function makeSumReducer(value) {
+  return {
+    add: makeAdder(value),
+    remove: makeAdder(makeInverter(value)),
+    initial: literalZero
+  };
+}
+
+function makeObjectReducer(value, reducer) {
+  return {
+    add: function(obj, d) {
+      var v = value(d);
+
+      keys(v).forEach(function(key) {
+        if (!(key in obj)) {
+          obj[key] = reducer.initial();
+        }
+
+        obj[key] = reducer.add.call(this, obj[key], v[key]);
+      });
+
+      return obj;
+    },
+    remove: function(obj, d) {
+      var v = value(d);
+
+      keys(v).forEach(function(key) {
+        if (key in obj) {
+          obj[key] = reducer.remove.call(this, obj[key], v[key]);
+
+          // Removing the value is an arbitrary decision
+          if (!obj[key]) {
+            delete obj[key];
+          }
+        }
+      });
+
+      return obj;
+    },
+    initial: literalObject
+  };
+}
+
+function makeDistinctReducer(value) {
+  return {
+    add: function(distinct, d) {
+      var v = value(d);
+
+      if (!(v in distinct)) {
+        distinct[v] = 0;
+      }
+
+      distinct[v]++;
+
+      return distinct;
+    },
+    remove: function(distinct, d) {
+      var v = value(d);
+
+      if (v in distinct) {
+        distinct[v]--;
+
+        if (!distinct[v]) {
+          delete distinct[v];
+        }
+      }
+
+      return distinct;
+    },
+    initial: literalObject
+  };
+}
