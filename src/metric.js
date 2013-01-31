@@ -263,8 +263,9 @@ analyst.metric = function(source) {
 
   // Filter the underlying dimension
   metric.filter = function(value) {
+    // Do nothing if there's no dimension to filter
     if (!dimension) {
-      throw new Error('A metric can only be filtered after being dimensioned');
+      return value === undefined ? metric : null;
     }
 
     return value === undefined ? dimension._value : dimension.filter.call(dimension, value);
