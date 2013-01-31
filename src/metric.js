@@ -245,6 +245,17 @@ analyst.metric = function(source) {
     return intermediate;
   }
 
+  metric.sumArray = makeReducer(addSumArrayReducer);
+
+  function addSumArrayReducer(field) {
+    var intermediate = fieldName(field, 'sum_array'),
+      value = makeIndexer(field, source);
+
+    reducers[intermediate] = makeArrayReducer(value, makeSumReducer());
+
+    return intermediate;
+  }
+
   // Get the underlying crossfilter dimension
   metric.dimension = function() {
     return dimension;

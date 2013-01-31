@@ -119,6 +119,11 @@ function literalObject() {
   return {};
 }
 
+// Function that returns a new array
+function literalArray() {
+  return [];
+}
+
 // Function that just returns zero
 function literalZero() {
   return 0;
@@ -179,6 +184,51 @@ function makeObjectReducer(value, reducer) {
   };
 }
 
+function makeArrayReducer(value, reducer) {
+  var indexOf = makeIndexOf(makeIndexer('key'));
+
+  return {
+    add: function(arr, d) {
+      var v = value(d);
+
+      v.forEach(function(obj) {
+        var index = indexOf(arr, obj.key);
+
+        if (index === -1) {
+          index = arr.length;
+          arr.push({
+            key: obj.key,
+            value: reducer.initial()
+          });
+        }
+
+        arr[index].value = reducer.add.call(this, arr[index].value, obj.value);
+      });
+
+      return arr;
+    },
+    remove: function(arr, d) {
+      var v = value(d);
+
+      v.forEach(function(obj) {
+        var index = indexOf(arr, obj.key);
+
+        if (index !== -1) {
+          arr[index].value = reducer.remove.call(this, arr[index].value, obj.value);
+
+          // Removing the value is an arbitrary decision
+          if (!arr[index].value) {
+            arr.splice(index, 1);
+          }
+        }
+      });
+
+      return arr;
+    },
+    initial: literalArray
+  };
+}
+
 function makeDistinctReducer(value) {
   return {
     add: function(distinct, d) {
@@ -206,5 +256,26 @@ function makeDistinctReducer(value) {
       return distinct;
     },
     initial: literalObject
+  };
+}
+
+// Create a function that finds the index of a item in an array given a value function
+function makeIndexOf(value) {
+  if (!isFunction(value)) {
+    return Function.prototype.call.bind(Array.prototype.indexOf);
+  }
+
+  return function findIndex(arr, search) {
+    var index = -1;
+
+    arr.every(function(item, i) {
+      if (search === value(item)) {
+        index = i;
+        return false;
+      }
+      return true;
+    });
+
+    return index;
   };
 }
