@@ -316,13 +316,6 @@ analyst.metric = function(source) {
     return metric.group().all().map(makeIndexer('key'));
   };
 
-  // Extract a single value from the result, or each result
-  metric.extract = function(alias, field) {
-    var value = makeIndexer(field || alias);
-
-    return field ? metric.transform(alias, value) : metric.transform(value);
-  };
-
   // Add a transform function to the stack that operates on the given output field
   metric.transform = function(alias) {
     var transforms = slice(arguments);
@@ -354,6 +347,49 @@ analyst.metric = function(source) {
 
     return metric;
   };
+
+  function makeTransformer(addTransform) {
+    return function(alias) {
+      var args = slice(arguments);
+
+      if (args.length <= addTransform.length) {
+        alias = '_';
+      } else {
+        args.shift();
+      }
+
+      transform = addTransform.apply(metric, args);
+
+      return metric.transform(alias, transform);
+    };
+  }
+
+  // Extract a single value from the result, or each result
+  metric.extract = makeTransformer(function(field) {
+    // Wrap in a function so that the number of arguments is correct
+    return makeIndexer(field)
+  });
+
+  // Limit the number of items in the field (only if it's an array)
+  metric.limit = makeTransformer(makeTruncator);
+
+  // Orders items by given the value accessor in ascending order
+  metric.order = metric.orderAsc = makeTransformer(makeSorter);
+
+  // Orders items by given the value accessor in descending order
+  metric.orderDesc = makeTransformer(function(value) {
+    var sorter = makeSorter(value);
+    return function(arr) {
+      return reverse(sorter(arr));
+    }
+  });
+
+  // Reverses items in the array
+  metric.reverse = makeTransformer(function() {
+    return function(arr) {
+      return reverse(slice(arr));
+    }
+  });
 
   // Propagate source events down to its metrics
   [ 'ready', 'change', 'filter' ].forEach(function(event) {

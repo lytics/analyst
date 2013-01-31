@@ -3,6 +3,7 @@
 
 // Courtesy of Ben Alman: http://benalman.com/news/2012/09/partial-application-in-javascript/#extra-credit
 var slice = Function.prototype.call.bind(Array.prototype.slice);
+var reverse = Function.prototype.call.bind(Array.prototype.reverse);
 
 // Returns an array of an object's keys
 var keys = Object.keys;
@@ -278,4 +279,32 @@ function makeIndexOf(value) {
 
     return index;
   };
+}
+
+// Create a transform function that sorts the value using the given value function
+function makeSorter(value) {
+  if (!isFunction(value)) {
+    value = makeIndexer(value);
+  }
+
+  var sorter = crossfilter.quicksort.by(value)
+
+  return function(arr) {
+    if (!isArray(arr)) {
+      return arr;
+    }
+
+    return sorter(slice(arr), 0, arr.length);
+  }
+}
+
+// Create a transform function that trucates the array to the given length
+function makeTruncator(length) {
+  return function (arr) {
+    if (!isArray(arr) || arr.length <= length) {
+      return arr;
+    }
+
+    return slice(arr, 0, length);
+  }
 }
