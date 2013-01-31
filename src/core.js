@@ -6,7 +6,7 @@ var root = this,
 
 // Namespace object
 var analyst = {
-  version: '0.1.0'
+  version: '0.1.1'
 };
 
 // Internal list of available drivers
