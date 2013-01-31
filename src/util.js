@@ -155,29 +155,33 @@ function makeObjectReducer(value, reducer) {
     add: function(obj, d) {
       var v = value(d);
 
-      keys(v).forEach(function(key) {
-        if (!(key in obj)) {
-          obj[key] = reducer.initial();
-        }
+      if (isObject(v)) {
+        keys(v).forEach(function(key) {
+          if (!(key in obj)) {
+            obj[key] = reducer.initial();
+          }
 
-        obj[key] = reducer.add.call(this, obj[key], v[key]);
-      });
+          obj[key] = reducer.add.call(this, obj[key], v[key]);
+        });
+      }
 
       return obj;
     },
     remove: function(obj, d) {
       var v = value(d);
 
-      keys(v).forEach(function(key) {
-        if (key in obj) {
-          obj[key] = reducer.remove.call(this, obj[key], v[key]);
+      if (isObject(v)) {
+        keys(v).forEach(function(key) {
+          if (key in obj) {
+            obj[key] = reducer.remove.call(this, obj[key], v[key]);
 
-          // Removing the value is an arbitrary decision
-          if (!obj[key]) {
-            delete obj[key];
+            // Removing the value is an arbitrary decision
+            if (!obj[key]) {
+              delete obj[key];
+            }
           }
-        }
-      });
+        });
+      }
 
       return obj;
     },
@@ -192,37 +196,41 @@ function makeArrayReducer(value, reducer) {
     add: function(arr, d) {
       var v = value(d);
 
-      v.forEach(function(obj) {
-        var index = indexOf(arr, obj.key);
+      if (isArray(v)) {
+        v.forEach(function(obj) {
+          var index = indexOf(arr, obj.key);
 
-        if (index === -1) {
-          index = arr.length;
-          arr.push({
-            key: obj.key,
-            value: reducer.initial()
-          });
-        }
+          if (index === -1) {
+            index = arr.length;
+            arr.push({
+              key: obj.key,
+              value: reducer.initial()
+            });
+          }
 
-        arr[index].value = reducer.add.call(this, arr[index].value, obj.value);
-      });
+          arr[index].value = reducer.add.call(this, arr[index].value, obj.value);
+        });
+      }
 
       return arr;
     },
     remove: function(arr, d) {
       var v = value(d);
 
-      v.forEach(function(obj) {
-        var index = indexOf(arr, obj.key);
+      if (isArray(v)) {
+        v.forEach(function(obj) {
+          var index = indexOf(arr, obj.key);
 
-        if (index !== -1) {
-          arr[index].value = reducer.remove.call(this, arr[index].value, obj.value);
+          if (index !== -1) {
+            arr[index].value = reducer.remove.call(this, arr[index].value, obj.value);
 
-          // Removing the value is an arbitrary decision
-          if (!arr[index].value) {
-            arr.splice(index, 1);
+            // Removing the value is an arbitrary decision
+            if (!arr[index].value) {
+              arr.splice(index, 1);
+            }
           }
-        }
-      });
+        });
+      }
 
       return arr;
     },
