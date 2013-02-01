@@ -234,6 +234,22 @@ analyst.metric = function(source) {
     return intermediate;
   }
 
+  // Find the maximum value of the given field
+  metric.max = makeReducer(addMaxReducer);
+
+  function addMaxReducer(field) {
+    var intermediate = fieldName(field, 'max'),
+      distinctsField = addDistinctReducer(field);
+
+    // Find the maximum value of the distinct values
+    transformStack.push(function(output) {
+      output[intermediate] = max(keys(output[distinctsField]));
+      return output;
+    });
+
+    return intermediate;
+  }
+
   metric.sumObject = makeReducer(addSumObjectReducer);
 
   function addSumObjectReducer(field) {

@@ -1,4 +1,4 @@
-/*jshint sub:true, boss:true*/
+/*jshint sub:true, boss:true, eqnull:true*/
 // Utilities
 
 // Courtesy of Ben Alman: http://benalman.com/news/2012/09/partial-application-in-javascript/#extra-credit
@@ -54,6 +54,20 @@ var isObject = is('object');
 
 // Checks if the object is an array
 var isArray = Array.isArray;
+
+// Identical to Math.max, but undefined values are ignored
+// NOTE: does not behave like d3.max; assumes values are numeric
+function max(arr) {
+  var c, m;
+
+  for (var i = 0, l = arr.length; i < l; i++) {
+    if ((c = +arr[i]) != null && (m == null || c > m)) {
+      m = c;
+    }
+  }
+
+  return m;
+}
 
 // Returns a name combining the field and modifier uniquely
 function fieldName(field, modifier) {
