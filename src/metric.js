@@ -368,7 +368,7 @@ analyst.metric = function(source) {
   // Extract a single value from the result, or each result
   metric.extract = makeTransformer(function(field) {
     // Wrap in a function so that the number of arguments is correct
-    return makeIndexer(field)
+    return makeIndexer(field);
   });
 
   // Limit the number of items in the field (only if it's an array)
@@ -382,14 +382,14 @@ analyst.metric = function(source) {
     var sorter = makeSorter(value);
     return function(arr) {
       return reverse(sorter(arr));
-    }
+    };
   });
 
   // Reverses items in the array
   metric.reverse = makeTransformer(function() {
     return function(arr) {
       return reverse(slice(arr));
-    }
+    };
   });
 
   // Propagate source events down to its metrics

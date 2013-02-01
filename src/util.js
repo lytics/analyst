@@ -287,7 +287,7 @@ function makeSorter(value) {
     value = makeIndexer(value);
   }
 
-  var sorter = crossfilter.quicksort.by(value)
+  var sorter = crossfilter.quicksort.by(value);
 
   return function(arr) {
     if (!isArray(arr)) {
@@ -295,7 +295,7 @@ function makeSorter(value) {
     }
 
     return sorter(slice(arr), 0, arr.length);
-  }
+  };
 }
 
 // Create a transform function that trucates the array to the given length
@@ -306,5 +306,5 @@ function makeTruncator(length) {
     }
 
     return slice(arr, 0, length);
-  }
+  };
 }
