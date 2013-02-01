@@ -23,6 +23,15 @@
       return Object.prototype.toString.call(obj) === "[object " + constructor + "]";
     };
   }
+  function max(arr) {
+    var c, m;
+    for (var i = 0, l = arr.length; i < l; i++) {
+      if ((c = +arr[i]) != null && (m == null || c > m)) {
+        m = c;
+      }
+    }
+    return m;
+  }
   function fieldName(field, modifier) {
     return (field ? field + "." : "") + modifier;
   }
@@ -88,24 +97,28 @@
     return {
       add: function(obj, d) {
         var v = value(d);
-        keys(v).forEach(function(key) {
-          if (!(key in obj)) {
-            obj[key] = reducer.initial();
-          }
-          obj[key] = reducer.add.call(this, obj[key], v[key]);
-        });
+        if (isObject(v)) {
+          keys(v).forEach(function(key) {
+            if (!(key in obj)) {
+              obj[key] = reducer.initial();
+            }
+            obj[key] = reducer.add.call(this, obj[key], v[key]);
+          });
+        }
         return obj;
       },
       remove: function(obj, d) {
         var v = value(d);
-        keys(v).forEach(function(key) {
-          if (key in obj) {
-            obj[key] = reducer.remove.call(this, obj[key], v[key]);
-            if (!obj[key]) {
-              delete obj[key];
+        if (isObject(v)) {
+          keys(v).forEach(function(key) {
+            if (key in obj) {
+              obj[key] = reducer.remove.call(this, obj[key], v[key]);
+              if (!obj[key]) {
+                delete obj[key];
+              }
             }
-          }
-        });
+          });
+        }
         return obj;
       },
       initial: literalObject
@@ -116,30 +129,34 @@
     return {
       add: function(arr, d) {
         var v = value(d);
-        v.forEach(function(obj) {
-          var index = indexOf(arr, obj.key);
-          if (index === -1) {
-            index = arr.length;
-            arr.push({
-              key: obj.key,
-              value: reducer.initial()
-            });
-          }
-          arr[index].value = reducer.add.call(this, arr[index].value, obj.value);
-        });
+        if (isArray(v)) {
+          v.forEach(function(obj) {
+            var index = indexOf(arr, obj.key);
+            if (index === -1) {
+              index = arr.length;
+              arr.push({
+                key: obj.key,
+                value: reducer.initial()
+              });
+            }
+            arr[index].value = reducer.add.call(this, arr[index].value, obj.value);
+          });
+        }
         return arr;
       },
       remove: function(arr, d) {
         var v = value(d);
-        v.forEach(function(obj) {
-          var index = indexOf(arr, obj.key);
-          if (index !== -1) {
-            arr[index].value = reducer.remove.call(this, arr[index].value, obj.value);
-            if (!arr[index].value) {
-              arr.splice(index, 1);
+        if (isArray(v)) {
+          v.forEach(function(obj) {
+            var index = indexOf(arr, obj.key);
+            if (index !== -1) {
+              arr[index].value = reducer.remove.call(this, arr[index].value, obj.value);
+              if (!arr[index].value) {
+                arr.splice(index, 1);
+              }
             }
-          }
-        });
+          });
+        }
         return arr;
       },
       initial: literalArray
@@ -270,7 +287,7 @@
   }
   var root = this, d3 = root.d3, crossfilter = root.crossfilter;
   var analyst = {
-    version: "0.1.1"
+    version: "0.1.2"
   };
   var drivers = {};
   analyst.addDriver = function(name, driver) {
@@ -536,6 +553,14 @@
       });
       return intermediate;
     }
+    function addMaxReducer(field) {
+      var intermediate = fieldName(field, "max"), distinctsField = addDistinctReducer(field);
+      transformStack.push(function(output) {
+        output[intermediate] = max(keys(output[distinctsField]));
+        return output;
+      });
+      return intermediate;
+    }
     function addSumObjectReducer(field) {
       var intermediate = fieldName(field, "sum_object"), value = makeIndexer(field, source);
       reducers[intermediate] = makeObjectReducer(value, makeSumReducer());
@@ -603,6 +628,7 @@
     metric.average = makeReducer(addAverageReducer);
     metric.distinct = makeReducer(addDistinctReducer);
     metric.distinctCount = makeReducer(addDistinctCountReducer);
+    metric.max = makeReducer(addMaxReducer);
     metric.sumObject = makeReducer(addSumObjectReducer);
     metric.sumArray = makeReducer(addSumArrayReducer);
     metric.dimension = function() {
