@@ -1,7 +1,7 @@
 // Module export
-if (typeof exports !== 'undefined') {
+if (typeof module !== 'undefined') {
   // CommonJS
-  exports.analyst = analyst;
+  module.exports = analyst;
 } else if (typeof define === 'function' && define.amd) {
   // AMD using a named module
   define('analyst', function() {
