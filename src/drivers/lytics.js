@@ -111,7 +111,7 @@ analyst.addDriver('lytics', function(options) {
   return function(limit) {
     // Hack this shiz in, old school JSONP it for now
     var script = document.createElement('script'),
-      cbName = 'analyst_lytics_' + (new Date()).getTime();
+      cbName = 'analyst_lytics_' + analyst.lytics.nonce++;
 
     options.data = options.data || {};
     options.data.callback = cbName;
@@ -126,3 +126,6 @@ analyst.addDriver('lytics', function(options) {
     document.body.appendChild(script);
   };
 });
+
+// Initialize the nonce (this could be any number, but timestamps are useful for debugging)
+analyst.lytics.nonce = new Date().getTime();
