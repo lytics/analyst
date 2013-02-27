@@ -192,9 +192,17 @@ analyst.metric = function(source) {
   metric.average = makeReducer(addAverageReducer);
 
   function addAverageReducer(field) {
-    var intermediate = fieldName(field, 'average'),
-      countField = addCountReducer(),
-      totalField = addSumReducer(field);
+    return addWeightedAverageReducer(field, null);
+  }
+
+  // Calculate an average given total and count fields
+  metric.weightedAverage = makeReducer(addWeightedAverageReducer);
+
+  function addWeightedAverageReducer(totalField, countField) {
+    var intermediate = fieldName(totalField, countField, 'average');
+
+    totalField = addSumReducer(totalField);
+    countField = countField ? addSumReducer(countField) : addCountReducer();
 
     // Perform the average at the end, since it can be computed from
     // intermediate calculations (but before aliases are applied)

@@ -73,14 +73,17 @@ function max(arr) {
 var functionId = 1;
 
 // Returns a name combining the field and modifier uniquely
-function fieldName(field, modifier) {
-  // If the field is a function, try to use its name, otherwise just treat it
-  // as a completely unique function
-  if (isFunction(field)) {
-    field = field.name || functionId++;
-  }
+function fieldName() {
+  var args = slice(arguments),
+    modifier = args.pop();
 
-  return (field ? field + '.' : '') + modifier;
+  name = args.map(function(field) {
+    // If the field is a function, try to use its name, otherwise just treat it
+    // as a completely unique function
+    return isFunction(field) ? (field.name || functionId++) : field;
+  }).join('_');
+
+  return (name ? name + '.' : '') + modifier;
 }
 
 // Returns a function that returns the value of the first arg at the index given
