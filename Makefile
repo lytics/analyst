@@ -7,7 +7,8 @@ JS_TESTER = $(NODE_PATH)/vows/bin/vows
 
 all: \
 	analyst.js \
-	analyst.min.js
+	analyst.min.js \
+	package.json
 
 full: \
 	analyst.embed.js \
@@ -46,6 +47,11 @@ test: all
 	@rm -f $@
 	@echo "Compiling $@..."
 	cat $(filter %.js,$^) | $(JS_BEAUTIFIER) > $@
+
+package.json: src/package.js src/core.js
+	@rm -f $@
+	node src/package.js > $@
+	@chmod a-w $@
 
 watch:
 	@echo "watching 'src' directory..."
