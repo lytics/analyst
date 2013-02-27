@@ -10,6 +10,7 @@ analyst.metric = function(source) {
     aliases = [],
     reducers = {},
     transformStack = [ clone ],
+    combinator = null,
     dateValue = makeIndexer('_date', source);
 
   // Apply all post-reduce transform functions
@@ -20,7 +21,7 @@ analyst.metric = function(source) {
     // function was appied, otherwise return the full output object
     if (inArray(aliases, '_')) {
       transforms.push(makeIndexer('_'));
-    } else {
+    } else if (!isFunction(combinator)) {
       // Create a new output object with no intermediate fields
       transforms.push(function(output) {
         return aliases.reduce(function(result, alias) {
@@ -343,7 +344,7 @@ analyst.metric = function(source) {
       }
       // Remove the field name from the transforms array
       transforms.shift();
-    } else {
+    } else if (!isFunction(combinator)) {
       if (!inArray(aliases, '_')) {
         throw new Error('An alias must be supplied for the transform to be applied to');
       }
@@ -354,13 +355,31 @@ analyst.metric = function(source) {
     // Allow transforms to be specified as a single array argument
     transforms = isArray(transforms[0]) ? transforms[0] : transforms;
 
-    // Wrap transform functions such that they apply to the given field
-    transforms.forEach(function(transform) {
-      transformStack.push(function(output) {
-        output[alias] = transform(output[alias]);
-        return output;
+    if (isFunction(combinator)) {
+      transformStack = transformStack.concat(transforms);
+    } else {
+      // Wrap transform functions such that they apply to the given field
+      transforms.forEach(function(transform) {
+        transformStack.push(function(output) {
+          output[alias] = transform(output[alias]);
+          return output;
+        });
       });
-    });
+    }
+
+    return metric;
+  };
+
+  metric.combine = function(transform) {
+    if (inArray(aliases, '_')) {
+      throw new Error('All reduce functions must be aliased to transform all values');
+    }
+
+    if (isFunction(combinator)) {
+      throw new Error('Only one combining function can be specified');
+    }
+
+    transformStack.push(combinator = transform);
 
     return metric;
   };
@@ -382,10 +401,9 @@ analyst.metric = function(source) {
   }
 
   // Extract a single value from the result, or each result
-  metric.extract = makeTransformer(function(field) {
-    // Wrap in a function so that the number of arguments is correct
-    return makeIndexer(field);
-  });
+  metric.extract = function(field) {
+    return metric.combine(makeIndexer(field));
+  };
 
   // Limit the number of items in the field (only if it's an array)
   metric.limit = makeTransformer(makeTruncator);
