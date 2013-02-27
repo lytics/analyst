@@ -134,7 +134,7 @@ analyst.source = function(type) {
     // Dimensions are expensive, so reuse them when possible
     if (!dimensions[value]) {
       // Create an indexing function if a field name was given
-      var valueFunc = isFunction(value) ? value.bind(source) : makeIndexer(value, source),
+      var valueFunc = makeIndexer(value, source),
         dimension = cf.dimension(valueFunc),
         filter = dimension.filter;
 

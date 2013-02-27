@@ -69,14 +69,27 @@ function max(arr) {
   return m;
 }
 
+// Unique identifier for anonymous value functions
+var functionId = 1;
+
 // Returns a name combining the field and modifier uniquely
 function fieldName(field, modifier) {
+  // If the field is a function, try to use its name, otherwise just treat it
+  // as a completely unique function
+  if (isFunction(field)) {
+    field = field.name || functionId++;
+  }
+
   return (field ? field + '.' : '') + modifier;
 }
 
 // Returns a function that returns the value of the first arg at the index given
 // by the specified field and field mapping
 function makeIndexer(field, context) {
+  if (isFunction(field)) {
+    return context ? field.bind(context) : field;
+  }
+
   // If no context is specified, return a simple accessor function
   if (!context) {
     return function(d) {
