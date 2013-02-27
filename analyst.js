@@ -32,10 +32,17 @@
     }
     return m;
   }
-  function fieldName(field, modifier) {
-    return (field ? field + "." : "") + modifier;
+  function fieldName() {
+    var args = slice(arguments), modifier = args.pop();
+    name = args.map(function(field) {
+      return isFunction(field) ? field.name || functionId++ : field;
+    }).join("_");
+    return (name ? name + "." : "") + modifier;
   }
   function makeIndexer(field, context) {
+    if (isFunction(field)) {
+      return context ? field.bind(context) : field;
+    }
     if (!context) {
       return function(d) {
         return d[field] || null;
@@ -287,7 +294,7 @@
   }
   var root = this, d3 = root.d3, crossfilter = root.crossfilter;
   var analyst = {
-    version: "0.1.2"
+    version: "0.1.3"
   };
   var drivers = {};
   analyst.addDriver = function(name, driver) {
@@ -308,6 +315,7 @@
   var isFunction = is("function");
   var isObject = is("object");
   var isArray = Array.isArray;
+  var functionId = 1;
   var incrementer = makeAdder(makeLiteral(1));
   var decrementer = makeAdder(makeLiteral(-1));
   var eventSplitter = /\s+/;
@@ -448,7 +456,7 @@
     };
     source.dimension = function(value) {
       if (!dimensions[value]) {
-        var valueFunc = isFunction(value) ? value.bind(source) : makeIndexer(value, source), dimension = cf.dimension(valueFunc), filter = dimension.filter;
+        var valueFunc = makeIndexer(value, source), dimension = cf.dimension(valueFunc), filter = dimension.filter;
         dimension.filter = function(value) {
           filter.call(dimension, value);
           dimension._value = value;
@@ -468,7 +476,7 @@
       var transforms = slice(transformStack);
       if (inArray(aliases, "_")) {
         transforms.push(makeIndexer("_"));
-      } else {
+      } else if (!isFunction(combinator)) {
         transforms.push(function(output) {
           return aliases.reduce(function(result, alias) {
             result[alias] = output[alias];
@@ -533,7 +541,12 @@
       return intermediate;
     }
     function addAverageReducer(field) {
-      var intermediate = fieldName(field, "average"), countField = addCountReducer(), totalField = addSumReducer(field);
+      return addWeightedAverageReducer(field, null);
+    }
+    function addWeightedAverageReducer(totalField, countField) {
+      var intermediate = fieldName(totalField, countField, "average");
+      totalField = addSumReducer(totalField);
+      countField = countField ? addSumReducer(countField) : addCountReducer();
       transformStack.push(function(output) {
         output[intermediate] = output[countField] ? output[totalField] / output[countField] : 0;
         return output;
@@ -583,7 +596,7 @@
         return metric.transform(alias, transform);
       };
     }
-    var metric = {}, dimension, group, aliases = [], reducers = {}, transformStack = [ clone ], dateValue = makeIndexer("_date", source);
+    var metric = {}, dimension, group, aliases = [], reducers = {}, transformStack = [ clone ], combinator = null, dateValue = makeIndexer("_date", source);
     addEventHandling(metric);
     metric.by = function(field) {
       if (dimension) {
@@ -626,6 +639,7 @@
     metric.count = makeReducer(addCountReducer);
     metric.sum = makeReducer(addSumReducer);
     metric.average = makeReducer(addAverageReducer);
+    metric.weightedAverage = makeReducer(addWeightedAverageReducer);
     metric.distinct = makeReducer(addDistinctReducer);
     metric.distinctCount = makeReducer(addDistinctCountReducer);
     metric.max = makeReducer(addMaxReducer);
@@ -682,24 +696,38 @@
           throw new Error("The specified reduce funciton alias has not been defined");
         }
         transforms.shift();
-      } else {
+      } else if (!isFunction(combinator)) {
         if (!inArray(aliases, "_")) {
           throw new Error("An alias must be supplied for the transform to be applied to");
         }
         alias = "_";
       }
       transforms = isArray(transforms[0]) ? transforms[0] : transforms;
-      transforms.forEach(function(transform) {
-        transformStack.push(function(output) {
-          output[alias] = transform(output[alias]);
-          return output;
+      if (isFunction(combinator)) {
+        transformStack = transformStack.concat(transforms);
+      } else {
+        transforms.forEach(function(transform) {
+          transformStack.push(function(output) {
+            output[alias] = transform(output[alias]);
+            return output;
+          });
         });
-      });
+      }
       return metric;
     };
-    metric.extract = makeTransformer(function(field) {
-      return makeIndexer(field);
-    });
+    metric.combine = function(transform) {
+      if (inArray(aliases, "_")) {
+        throw new Error("All reduce functions must be aliased to transform all values");
+      }
+      if (isFunction(combinator)) {
+        throw new Error("Only one combining function can be specified");
+      }
+      transformStack.push(combinator = transform);
+      return metric;
+    };
+    metric.extract = function(field) {
+      return metric.combine(makeIndexer(field));
+    };
     metric.limit = makeTransformer(makeTruncator);
     metric.order = metric.orderAsc = makeTransformer(makeSorter);
     metric.orderDesc = makeTransformer(function(value) {
@@ -799,7 +827,7 @@
     var source = this;
     options = options || {};
     return function(limit) {
-      var script = document.createElement("script"), cbName = "analyst_lytics_" + (new Date).getTime();
+      var script = document.createElement("script"), cbName = "analyst_lytics_" + analyst.lytics.nonce++;
       options.data = options.data || {};
       options.data.callback = cbName;
       root[cbName] = function(response) {
@@ -811,8 +839,9 @@
       document.body.appendChild(script);
     };
   });
-  if (typeof exports !== "undefined") {
-    exports.analyst = analyst;
+  analyst.lytics.nonce = (new Date).getTime();
+  if (typeof module !== "undefined") {
+    module.exports = analyst;
   } else if (typeof define === "function" && define.amd) {
     define("analyst", function() {
       return analyst;
