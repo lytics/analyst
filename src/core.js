@@ -1,8 +1,6 @@
 /*jshint sub:true, boss:true*/
 // 'Root' object, `window` in browsers, `global` in Node
-var root = this,
-  d3 = root.d3,
-  crossfilter = root.crossfilter;
+var root = this;
 
 // Namespace object
 var analyst = {

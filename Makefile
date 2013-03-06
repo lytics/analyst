@@ -28,7 +28,6 @@ analyst.embed.js: \
 	src/source.js \
 	src/metric.js \
 	analyst.drivers.js \
-	src/export.js \
 	src/end.js
 
 analyst.drivers.js: \
