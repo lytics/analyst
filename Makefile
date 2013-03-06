@@ -65,6 +65,6 @@ watch:
 		});"
 
 clean:
-	rm -f analyst*.js
+	rm -f analyst*.js package.json
 
 .PHONY: all test watch clean
